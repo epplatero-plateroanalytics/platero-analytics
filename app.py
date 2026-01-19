@@ -7,7 +7,12 @@ from pdf_engine_cloud import gerar_pdf
 from ai_analyst import analisar_com_ia
 
 # --- Configuração da Página (TEM QUE SER A PRIMEIRA LINHA) ---
-st.set_page_config(page_title="Relatório Premium — Platero Analytics", layout="wide")
+# --- Configuração da Página (TEM QUE SER A PRIMEIRA LINHA) ---
+st.set_page_config(
+    page_title="Relatório Premium — Platero Analytics",
+    page_icon="logo.png",  # <--- AQUI MUDAMOS PARA O SEU LOGO
+    layout="wide"
+)
 
 # --- SISTEMA DE LOGIN (O PORTEIRO) ---
 def check_password():
