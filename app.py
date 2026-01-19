@@ -7,14 +7,12 @@ from pdf_engine_cloud import gerar_pdf
 from ai_analyst import analisar_com_ia
 
 # --- Configuração da Página (TEM QUE SER A PRIMEIRA LINHA) ---
-# --- Configuração da Página (TEM QUE SER A PRIMEIRA LINHA) ---
 st.set_page_config(
     page_title="Relatório Premium — Platero Analytics",
-    page_icon="logo.png",  # <--- AQUI MUDAMOS PARA O SEU LOGO
+    page_icon="logo.png",
     layout="wide"
 )
 
-# --- SISTEMA DE LOGIN (O PORTEIRO) ---
 # --- SISTEMA DE LOGIN MULTI-USUÁRIO ---
 def check_password():
     """Retorna True se o usuário/senha estiverem corretos."""
@@ -22,8 +20,13 @@ def check_password():
     def password_entered():
         """Checa se a senha bate com algum usuário do cofre."""
         # Pega a lista de senhas do arquivo secrets
-        usuarios_permitidos = st.secrets["passwords"]
-        
+        if "passwords" in st.secrets:
+            usuarios_permitidos = st.secrets["passwords"]
+        else:
+            # Fallback caso o secrets não esteja configurado ainda
+            st.error("⚠️ Erro: Arquivo de senhas (Secrets) não configurado.")
+            return
+
         # O que o usuário digitou
         senha_digitada = st.session_state["password"]
         
@@ -51,8 +54,13 @@ def check_password():
             st.error("🚫 Acesso negado. Chave inválida ou expirada.")
 
     return False
+
+# --- AQUI ESTAVA O ERRO: O COMANDO ABAIXO TINHA SUMIDO ---
+if not check_password():
+    st.stop()
+
 # ---------------------------------------------------------
-# DAQUI PARA BAIXO É O SEU APP NORMAL
+# DAQUI PARA BAIXO É O SEU APP NORMAL (SÓ RODA SE LOGAR)
 # ---------------------------------------------------------
 
 if "pdf_ready" not in st.session_state:
@@ -61,15 +69,12 @@ if "analise_ia" not in st.session_state:
     st.session_state["analise_ia"] = ""
 
 # --- NOVO CABEÇALHO COM LOGO ---
-# Cria duas colunas: uma estreita (1) para o logo, uma larga (10) para o texto
 col_logo, col_titulo = st.columns([1, 10])
 
 with col_logo:
-    # Mostra o logo e ajusta a largura automaticamente
     st.image("logo.png", use_column_width=True)
 
 with col_titulo:
-    # Escreve o título bem grande usando Markdown (#)
     st.markdown("# Agente Universal PRO — Platero Analytics")
 # --------------------------------
 st.markdown("---")
@@ -128,10 +133,8 @@ with col_grafico:
 with col_insights:
     st.subheader("🤖 Inteligência Artificial")
     
-    # SELETORES DA IA (CORRIGIDO: AGORA SÓ ACEITA NÚMEROS NO VALOR)
     col_x_ia = st.selectbox("Coluna de Texto/Data:", list(df.columns), index=0)
     
-    # Aqui está a correção: usamos a lista 'numericas' em vez de todas as colunas
     if numericas:
         col_y_ia = st.selectbox("Coluna de Valor (R$):", numericas, index=0)
     else:
@@ -154,7 +157,6 @@ if st.session_state.get("pdf_ready"):
     figs = st.session_state.get("figs_pdf", [])
     try:
         with st.spinner("Gerando PDF..."):
-            # Passamos o df completo e os metadados corretos
             pdf_bytes = gerar_pdf(
                 df=df, 
                 df_filtrado=df, 
