@@ -32,58 +32,73 @@ def gerar_pdf(df, df_filtrado, datas, numericas, categoricas, figs, lang="pt"):
     pdf = PDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     
-    # --- PÁGINA 1: RESUMO E PRIMEIRO GRÁFICO ---
+    # --- PÁGINA 1: RESUMO E RANKING ---
     pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, "1. Resumo Executivo", ln=True)
     pdf.ln(5)
     
     pdf.set_font("Arial", size=11)
-    # Cards de resumo
     total_val = df[numericas[0]].sum() if numericas else 0
     media_val = df[numericas[0]].mean() if numericas else 0
     
     pdf.cell(0, 8, f"Total de Registros Analisados: {len(df)}", ln=True)
     pdf.cell(0, 8, f"Volume Total Processado: {total_val:,.2f}", ln=True)
     pdf.cell(0, 8, f"Ticket Medio: {media_val:,.2f}", ln=True)
-    pdf.ln(10)
+    pdf.ln(5)
 
-    # Gráfico 1 (Ranking)
     if len(figs) > 0:
         pdf.set_font("Arial", 'B', 12)
         pdf.cell(0, 10, "2. Analise de Ranking (Top Performers)", ln=True)
-        # Salva e insere
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
         figs[0].savefig(temp_file.name, dpi=100, bbox_inches='tight')
         pdf.image(temp_file.name, x=10, w=190)
-        pdf.ln(5)
 
-    # --- PÁGINA 2: TENDÊNCIAS E COMPOSIÇÃO ---
+    # --- PÁGINA 2: TENDÊNCIAS E SHARE ---
     if len(figs) > 1:
         pdf.add_page()
         pdf.set_font("Arial", 'B', 12)
-        pdf.cell(0, 10, "3. Analise Temporal e Distribuicao", ln=True)
+        pdf.cell(0, 10, "3. Analise Temporal e Mercado", ln=True)
         pdf.ln(5)
 
-        # Gráfico 2 (Linha do Tempo)
+        # Linha do Tempo
         temp_file2 = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
         figs[1].savefig(temp_file2.name, dpi=100, bbox_inches='tight')
-        pdf.image(temp_file2.name, x=10, w=180) # Um pouco menor para caber dois
-        pdf.ln(10)
+        pdf.image(temp_file2.name, x=10, w=180)
+        pdf.ln(5)
 
-        # Gráfico 3 (Pizza/Donut) se existir
+        # Pizza
         if len(figs) > 2:
-            pdf.cell(0, 10, "Share de Mercado (Top 5 vs Outros)", ln=True)
+            pdf.cell(0, 10, "Share de Mercado (Top 5)", ln=True)
             temp_file3 = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
             figs[2].savefig(temp_file3.name, dpi=100, bbox_inches='tight')
-            pdf.image(temp_file3.name, x=30, w=150) # Centralizado
+            pdf.image(temp_file3.name, x=40, w=130)
 
-    # --- PÁGINA 3: INTELIGÊNCIA ARTIFICIAL ---
+    # --- PÁGINA 3: ESTATÍSTICA AVANÇADA (NOVA!) ---
+    if len(figs) > 3:
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, "4. Analise Estatistica Avancada", ln=True)
+        pdf.ln(5)
+
+        # Boxplot
+        pdf.cell(0, 10, "Distribuicao e Variabilidade (Boxplot)", ln=True)
+        temp_file4 = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        figs[3].savefig(temp_file4.name, dpi=100, bbox_inches='tight')
+        pdf.image(temp_file4.name, x=10, w=180)
+        pdf.ln(5)
+
+        # Heatmap
+        if len(figs) > 4:
+            pdf.cell(0, 10, "Mapa de Correlacao (Heatmap)", ln=True)
+            temp_file5 = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+            figs[4].savefig(temp_file5.name, dpi=100, bbox_inches='tight')
+            pdf.image(temp_file5.name, x=50, w=110)
+
+    # --- PÁGINA 4: INTELIGÊNCIA ARTIFICIAL ---
     pdf.add_page()
     pdf.set_font("Arial", 'B', 14)
-    pdf.cell(0, 10, "4. Parecer da Inteligencia Artificial", ln=True)
+    pdf.cell(0, 10, "5. Parecer da Inteligencia Artificial", ln=True)
     pdf.ln(5)
     
     pdf.set_font("Arial", size=11)
