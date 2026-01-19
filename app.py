@@ -5,62 +5,63 @@ from utils import detectar_tipos
 from layout import render_layout
 from pdf_engine_cloud import gerar_pdf
 from ai_analyst import analisar_com_ia
+from database import init_db, salvar_registro, carregar_historico # <--- NOVO IMPORT
 
-# --- Configuração da Página (TEM QUE SER A PRIMEIRA LINHA) ---
+# --- Configuração da Página ---
 st.set_page_config(
     page_title="Relatório Premium — Platero Analytics",
     page_icon="logo.png",
     layout="wide"
 )
 
-# --- SISTEMA DE LOGIN MULTI-USUÁRIO ---
+# --- INICIALIZA O BANCO DE DADOS ---
+init_db()
+
+# --- SISTEMA DE LOGIN (AGORA IDENTIFICA O USUÁRIO) ---
 def check_password():
-    """Retorna True se o usuário/senha estiverem corretos."""
+    """Retorna True se o login for sucesso e SALVA O NOME DO USUÁRIO."""
 
     def password_entered():
-        """Checa se a senha bate com algum usuário do cofre."""
-        # Pega a lista de senhas do arquivo secrets
         if "passwords" in st.secrets:
-            usuarios_permitidos = st.secrets["passwords"]
+            usuarios = st.secrets["passwords"]
+            senha_digitada = st.session_state["password"]
+            
+            # Procura a senha no dicionário para achar o NOME do usuário
+            usuario_encontrado = None
+            for user, password in usuarios.items():
+                if password == senha_digitada:
+                    usuario_encontrado = user
+                    break
+            
+            if usuario_encontrado:
+                st.session_state["password_correct"] = True
+                st.session_state["username"] = usuario_encontrado # <--- Salva quem entrou
+                del st.session_state["password"]
+            else:
+                st.session_state["password_correct"] = False
         else:
-            # Fallback caso o secrets não esteja configurado ainda
             st.error("⚠️ Erro: Arquivo de senhas (Secrets) não configurado.")
-            return
-
-        # O que o usuário digitou
-        senha_digitada = st.session_state["password"]
-        
-        # Verifica se a senha digitada existe em algum dos valores do dicionário
-        if senha_digitada in usuarios_permitidos.values():
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Limpa a senha da memória
-        else:
-            st.session_state["password_correct"] = False
 
     if st.session_state.get("password_correct", False):
         return True
 
-    # Tela de Login
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
         st.markdown("### 🔒 Área Restrita")
-        st.text_input(
-            "Digite sua Chave de Acesso:", 
-            type="password", 
-            on_change=password_entered, 
-            key="password"
-        )
+        st.text_input("Digite sua Chave de Acesso:", type="password", on_change=password_entered, key="password")
         if "password_correct" in st.session_state:
-            st.error("🚫 Acesso negado. Chave inválida ou expirada.")
+            st.error("🚫 Acesso negado.")
 
     return False
 
-# --- AQUI ESTAVA O ERRO: O COMANDO ABAIXO TINHA SUMIDO ---
 if not check_password():
     st.stop()
 
+# Pega o nome do usuário logado
+usuario_atual = st.session_state.get("username", "desconhecido")
+
 # ---------------------------------------------------------
-# DAQUI PARA BAIXO É O SEU APP NORMAL (SÓ RODA SE LOGAR)
+# DAQUI PARA BAIXO É O APP COM BANCO DE DADOS
 # ---------------------------------------------------------
 
 if "pdf_ready" not in st.session_state:
@@ -68,27 +69,29 @@ if "pdf_ready" not in st.session_state:
 if "analise_ia" not in st.session_state:
     st.session_state["analise_ia"] = ""
 
-# --- NOVO CABEÇALHO COM LOGO ---
+# --- CABEÇALHO ---
 col_logo, col_titulo = st.columns([1, 10])
-
-with col_logo:
-    st.image("logo.png", use_column_width=True)
-
-with col_titulo:
+with col_logo: st.image("logo.png", use_column_width=True)
+with col_titulo: 
     st.markdown("# Agente Universal PRO — Platero Analytics")
-# --------------------------------
+    st.caption(f"Logado como: **{usuario_atual}**") # Mostra quem está logado
+
 st.markdown("---")
 
-# --- BARRA LATERAL ---
+# --- BARRA LATERAL (UPLOAD) ---
 st.sidebar.header("1. Upload de Arquivo")
 arquivo = st.sidebar.file_uploader("Selecione sua planilha", type=["xlsx", "csv"])
 
-if arquivo:
-    st.sidebar.markdown("---")
-    st.sidebar.header("2. Ajuste de Leitura")
-    pular_linhas = st.sidebar.slider("Pular linhas do topo:", 0, 10, 0)
-else:
-    pular_linhas = 0
+# --- ÁREA DO HISTÓRICO (NOVIDADE!) ---
+st.sidebar.markdown("---")
+st.sidebar.header("📜 Histórico de Envios")
+if st.sidebar.checkbox("Ver meu histórico"):
+    df_hist = carregar_historico(usuario_atual)
+    if not df_hist.empty:
+        st.sidebar.dataframe(df_hist)
+        st.sidebar.info(f"Você já processou {len(df_hist)} relatórios.")
+    else:
+        st.sidebar.warning("Nenhum histórico encontrado.")
 
 if not arquivo:
     st.info("⬅️ Envie uma planilha na barra lateral para começar.")
@@ -97,22 +100,15 @@ if not arquivo:
 # --- LEITURA ---
 try:
     if arquivo.name.endswith(".xlsx"):
-        df = pd.read_excel(arquivo, skiprows=pular_linhas)
+        df = pd.read_excel(arquivo)
     else:
-        try:
-            df = pd.read_csv(arquivo, sep=";", skiprows=pular_linhas)
-        except:
-            df = pd.read_csv(arquivo, sep=",", skiprows=pular_linhas)
+        df = pd.read_csv(arquivo, sep=",") # Tenta vírgula padrão
 
-    with st.expander("👀 Clique para conferir a leitura", expanded=True):
+    with st.expander("👀 Clique para conferir a leitura", expanded=False):
         st.dataframe(df.head())
 
 except Exception as e:
-    st.error(f"Erro ao ler o arquivo: {e}")
-    st.stop()
-
-if df.empty:
-    st.error("A planilha está vazia.")
+    st.error(f"Erro ao ler: {e}")
     st.stop()
 
 # --- PROCESSAMENTO ---
@@ -123,6 +119,15 @@ if not numericas:
     st.warning("⚠️ Não encontramos colunas numéricas.")
     st.stop()
 
+# --- SALVAMENTO AUTOMÁTICO NO BANCO ---
+# Verifica se já salvamos esse arquivo nesta sessão para não duplicar
+chave_salvamento = f"salvo_{arquivo.name}"
+if chave_salvamento not in st.session_state:
+    sucesso = salvar_registro(usuario_atual, arquivo.name, df, numericas[0])
+    if sucesso:
+        st.toast("✅ Dados salvos no histórico com sucesso!")
+        st.session_state[chave_salvamento] = True
+
 # --- PAINEL INTERATIVO ---
 st.subheader("📊 Painel de Controle")
 col_grafico, col_insights = st.columns([2, 1])
@@ -132,21 +137,15 @@ with col_grafico:
 
 with col_insights:
     st.subheader("🤖 Inteligência Artificial")
-    
-    col_x_ia = st.selectbox("Coluna de Texto/Data:", list(df.columns), index=0)
-    
-    if numericas:
-        col_y_ia = st.selectbox("Coluna de Valor (R$):", numericas, index=0)
-    else:
-        st.error("Sem colunas numéricas para a IA analisar.")
-        st.stop()
+    col_x_ia = st.selectbox("Eixo X (Texto):", list(df.columns), index=0)
+    col_y_ia = st.selectbox("Eixo Y (Valor):", numericas, index=0)
 
-    if st.button("✨ Gerar Análise Automática"):
-        with st.spinner("A IA está analisando os dados..."):
+    if st.button("✨ Gerar Análise"):
+        with st.spinner("Analisando..."):
             texto_ia = analisar_com_ia(df, col_x_ia, col_y_ia)
             st.session_state["analise_ia"] = texto_ia
             
-    analise_final = st.text_area("Texto do Relatório:", value=st.session_state["analise_ia"], height=200)
+    analise_final = st.text_area("Relatório:", value=st.session_state["analise_ia"], height=200)
     st.session_state["analise_texto"] = analise_final
 
     if st.button("📄 Gerar PDF"):
@@ -155,19 +154,5 @@ with col_insights:
 # --- GERAÇÃO DO PDF ---
 if st.session_state.get("pdf_ready"):
     figs = st.session_state.get("figs_pdf", [])
-    try:
-        with st.spinner("Gerando PDF..."):
-            pdf_bytes = gerar_pdf(
-                df=df, 
-                df_filtrado=df, 
-                datas=datas, 
-                numericas=numericas, 
-                categoricas=categoricas, 
-                figs=figs, 
-                lang="pt"
-            )
-        st.success("Sucesso!")
-        st.download_button("⬇️ Baixar PDF", data=pdf_bytes, file_name="Relatorio_Platero.pdf", mime="application/pdf")
-        st.session_state["pdf_ready"] = False
-    except Exception as e:
-        st.error(f"Erro no PDF: {e}")
+    pdf_bytes = gerar_pdf(df, df, datas, numericas, categoricas, figs, lang="pt")
+    st.download_button("⬇️ Baixar PDF", data=pdf_bytes, file_name="Relatorio_Platero.pdf", mime="application/pdf")
