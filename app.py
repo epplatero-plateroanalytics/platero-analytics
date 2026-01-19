@@ -57,7 +57,18 @@ if "pdf_ready" not in st.session_state:
 if "analise_ia" not in st.session_state:
     st.session_state["analise_ia"] = ""
 
-st.title("🚀 Agente Universal PRO — Platero Analytics")
+# --- NOVO CABEÇALHO COM LOGO ---
+# Cria duas colunas: uma estreita (1) para o logo, uma larga (10) para o texto
+col_logo, col_titulo = st.columns([1, 10])
+
+with col_logo:
+    # Mostra o logo e ajusta a largura automaticamente
+    st.image("logo.png", use_column_width=True)
+
+with col_titulo:
+    # Escreve o título bem grande usando Markdown (#)
+    st.markdown("# Agente Universal PRO — Platero Analytics")
+# --------------------------------
 st.markdown("---")
 
 # --- BARRA LATERAL ---
