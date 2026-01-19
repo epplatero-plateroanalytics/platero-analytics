@@ -15,39 +15,42 @@ st.set_page_config(
 )
 
 # --- SISTEMA DE LOGIN (O PORTEIRO) ---
+# --- SISTEMA DE LOGIN MULTI-USUÁRIO ---
 def check_password():
-    """Retorna True se o usuário tiver a senha correta."""
+    """Retorna True se o usuário/senha estiverem corretos."""
 
     def password_entered():
-        """Checa se a senha digitada bate com a do cofre."""
-        if st.session_state["password"] == st.secrets["SENHA_ACESSO"]:
+        """Checa se a senha bate com algum usuário do cofre."""
+        # Pega a lista de senhas do arquivo secrets
+        usuarios_permitidos = st.secrets["passwords"]
+        
+        # O que o usuário digitou
+        senha_digitada = st.session_state["password"]
+        
+        # Verifica se a senha digitada existe em algum dos valores do dicionário
+        if senha_digitada in usuarios_permitidos.values():
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Não armazena a senha
+            del st.session_state["password"]  # Limpa a senha da memória
         else:
             st.session_state["password_correct"] = False
 
-    # Se a senha já estiver correta, retorna True
     if st.session_state.get("password_correct", False):
         return True
 
-    # Se não, mostra a tela de login
-    st.title("🔒 Área Restrita - Platero Analytics")
-    st.text_input(
-        "Digite a senha de acesso:", 
-        type="password", 
-        on_change=password_entered, 
-        key="password"
-    )
-    
-    if "password_correct" in st.session_state:
-        st.error("😕 Senha incorreta. Tente novamente.")
-        
+    # Tela de Login
+    col1, col2, col3 = st.columns([1,2,1])
+    with col2:
+        st.markdown("### 🔒 Área Restrita")
+        st.text_input(
+            "Digite sua Chave de Acesso:", 
+            type="password", 
+            on_change=password_entered, 
+            key="password"
+        )
+        if "password_correct" in st.session_state:
+            st.error("🚫 Acesso negado. Chave inválida ou expirada.")
+
     return False
-
-# SE A SENHA NÃO ESTIVER CERTA, PARA TUDO AQUI.
-if not check_password():
-    st.stop()
-
 # ---------------------------------------------------------
 # DAQUI PARA BAIXO É O SEU APP NORMAL
 # ---------------------------------------------------------
