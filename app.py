@@ -44,7 +44,7 @@ if not check_password():
     st.stop()
 
 # ---------------------------------------------------------
-# DAQUI PARA BAIXO É O SEU APP NORMAL (SÓ CARREGA SE LOGAR)
+# DAQUI PARA BAIXO É O SEU APP NORMAL
 # ---------------------------------------------------------
 
 if "pdf_ready" not in st.session_state:
@@ -109,8 +109,15 @@ with col_grafico:
 with col_insights:
     st.subheader("🤖 Inteligência Artificial")
     
+    # SELETORES DA IA (CORRIGIDO: AGORA SÓ ACEITA NÚMEROS NO VALOR)
     col_x_ia = st.selectbox("Coluna de Texto/Data:", list(df.columns), index=0)
-    col_y_ia = st.selectbox("Coluna de Valor:", list(df.columns), index=len(df.columns)-1)
+    
+    # Aqui está a correção: usamos a lista 'numericas' em vez de todas as colunas
+    if numericas:
+        col_y_ia = st.selectbox("Coluna de Valor (R$):", numericas, index=0)
+    else:
+        st.error("Sem colunas numéricas para a IA analisar.")
+        st.stop()
 
     if st.button("✨ Gerar Análise Automática"):
         with st.spinner("A IA está analisando os dados..."):
@@ -128,7 +135,16 @@ if st.session_state.get("pdf_ready"):
     figs = st.session_state.get("figs_pdf", [])
     try:
         with st.spinner("Gerando PDF..."):
-            pdf_bytes = gerar_pdf(df, df, datas, numericas, categoricas, figs, lang="pt")
+            # Passamos o df completo e os metadados corretos
+            pdf_bytes = gerar_pdf(
+                df=df, 
+                df_filtrado=df, 
+                datas=datas, 
+                numericas=numericas, 
+                categoricas=categoricas, 
+                figs=figs, 
+                lang="pt"
+            )
         st.success("Sucesso!")
         st.download_button("⬇️ Baixar PDF", data=pdf_bytes, file_name="Relatorio_Platero.pdf", mime="application/pdf")
         st.session_state["pdf_ready"] = False
