@@ -19,28 +19,23 @@ def limpar_planilha(df):
     df = df.dropna(how='all')
 
     # 3. CONVERTER DATA (Se existir coluna 'Data')
-    # Procura colunas que pareçam data
     cols_data = [c for c in df.columns if 'DATA' in str(c).upper()]
     for col in cols_data:
         df[col] = pd.to_datetime(df[col], errors='coerce')
 
     # 4. LIMPEZA DE NÚMEROS E DINHEIRO
-    # Tenta converter todas as colunas de objeto (texto) para número
     for col in df.columns:
         if df[col].dtype == 'object':
-            # Guarda uma cópia para tentar limpar
             series_limpa = df[col].astype(str).str.replace('R$', '', regex=False)
-            series_limpa = series_limpa.str.replace('.', '', regex=False) # Tira ponto de milhar
-            series_limpa = series_limpa.str.replace(',', '.', regex=False) # Troca vírgula por ponto
-            
+            series_limpa = series_limpa.str.replace('.', '', regex=False) # Tira ponto milhar
+            series_limpa = series_limpa.str.replace(',', '.', regex=False) # Troca vírgula
             try:
-                # Tenta converter. Se der erro, volta a ser texto.
                 df[col] = pd.to_numeric(series_limpa)
             except:
-                pass # Se falhar, deixa como texto (ex: nome do cliente)
+                pass 
 
-    # 5. REMOVER A LINHA DE "TOTAL" (CRUCIAL!)
-    # Se alguma coluna de texto tiver a palavra "Total", exclui a linha inteira
+    # 5. REMOVER A LINHA DE "TOTAL" (O SEGREDO!)
+    # Procura a palavra "Total" ou "TOTAL" em qualquer coluna e exclui a linha
     for col in df.select_dtypes(include=['object']).columns:
         df = df[~df[col].astype(str).str.contains("TOTAL", case=False, na=False)]
         df = df[~df[col].astype(str).str.contains("Total", case=False, na=False)]
