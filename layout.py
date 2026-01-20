@@ -9,29 +9,31 @@ def render_layout(df, datas, numericas, categoricas, lang="pt"):
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        # Garante que existam opções
-        opcoes_x = datas + categoricas
-        if not opcoes_x: opcoes_x = list(df.columns)
-        eixo_x = st.selectbox("Eixo X (Categoria/Tempo):", options=opcoes_x, index=0)
+        # MUDANÇA AQUI: Liberamos TODAS as colunas para o Eixo X
+        # Antes era: opcoes_x = datas + categoricas
+        opcoes_x = list(df.columns)
+        
+        eixo_x = st.selectbox("Eixo X (Agrupamento):", options=opcoes_x, index=0)
     
     with col2:
         if not numericas:
             st.error("Não há colunas numéricas para analisar.")
             return df
-        eixo_y = st.selectbox("Eixo Y (Valor/Métrica):", options=numericas, index=0)
+        eixo_y = st.selectbox("Eixo Y (Métrica):", options=numericas, index=0)
     
     with col3:
-        top_n = st.slider("Filtrar Top N itens:", 5, 20, 10)
+        top_n = st.slider("Quantidade de Itens:", 5, 20, 10)
 
     # --- PROCESSAMENTO SEGURO ---
     try:
-        # Tenta converter para string para garantir o agrupamento
+        # Converte para string para garantir o agrupamento, mesmo se for número (ex: Ano 2015)
         df[eixo_x] = df[eixo_x].astype(str)
         df_grouped = df.groupby(eixo_x)[eixo_y].sum().reset_index()
     except Exception as e:
         st.error(f"Erro ao processar dados: {e}")
         return df
 
+    # Ordena do maior para o menor
     df_grouped = df_grouped.sort_values(by=eixo_y, ascending=False).head(top_n)
     
     # --- DADOS PARA O BOXPLOT ---
@@ -40,12 +42,15 @@ def render_layout(df, datas, numericas, categoricas, lang="pt"):
 
     figs_para_pdf = []
 
-    # --- GRÁFICO 1: BARRAS (SIMPLIFICADO) ---
+    # --- GRÁFICO 1: BARRAS ---
     try:
         fig1, ax1 = plt.subplots(figsize=(8, 4))
         sns.barplot(data=df_grouped, x=eixo_x, y=eixo_y, palette="viridis", ax=ax1)
         ax1.set_title(f"Ranking: {eixo_y} por {eixo_x}")
         ax1.tick_params(axis='x', rotation=45)
+        # Adiciona rótulos nas barras
+        for i in ax1.containers:
+            ax1.bar_label(i, fmt='%.0f', padding=3)
         plt.tight_layout()
         figs_para_pdf.append(fig1)
     except:
@@ -54,9 +59,12 @@ def render_layout(df, datas, numericas, categoricas, lang="pt"):
     # --- GRÁFICO 2: LINHA DO TEMPO ---
     try:
         fig2 = None
-        # Verifica se é data ou se forçamos uma linha temporal
-        if (eixo_x in datas) or (len(datas) > 0):
-            col_tempo = eixo_x if eixo_x in datas else datas[0]
+        # Verifica se parece data ou ano (números baixos < 3000)
+        # Se escolheu "ANO", faz sentido mostrar linha
+        if (eixo_x in datas) or ('ANO' in str(eixo_x).upper()) or (len(datas) > 0):
+            col_tempo = eixo_x if (eixo_x in datas or 'ANO' in str(eixo_x).upper()) else datas[0]
+            
+            # Reagrupa por tempo, mantendo a ordem cronológica se possível
             df_tempo = df.groupby(col_tempo)[eixo_y].sum().reset_index()
             
             fig2, ax2 = plt.subplots(figsize=(8, 4))
@@ -72,46 +80,11 @@ def render_layout(df, datas, numericas, categoricas, lang="pt"):
     # --- GRÁFICO 3: PIZZA ---
     try:
         fig3, ax3 = plt.subplots(figsize=(6, 4))
-        top_5 = df.groupby(eixo_x)[eixo_y].sum().nlargest(5)
-        outros = df[eixo_y].sum() - top_5.sum()
-        if outros < 0: outros = 0
-        
-        dados = top_5.copy()
-        dados["Outros"] = outros
-        
-        ax3.pie(dados, labels=dados.index, autopct='%1.1f%%', startangle=90, colors=sns.color_palette("pastel"))
-        ax3.set_title("Share Top 5")
+        # Usa os dados agrupados (Top N)
+        ax3.pie(df_grouped[eixo_y], labels=df_grouped[eixo_x], autopct='%1.1f%%', startangle=90, colors=sns.color_palette("pastel"))
+        ax3.set_title(f"Share Top {top_n}")
         plt.tight_layout()
         figs_para_pdf.append(fig3)
-    except:
-        figs_para_pdf.append(plt.figure())
-
-    # --- GRÁFICO 4: BOXPLOT (CORREÇÃO DO ERRO) ---
-    try:
-        fig4, ax4 = plt.subplots(figsize=(8, 4))
-        # Removemos parâmetros complexos que causavam o erro 'boxprops'
-        sns.boxplot(data=df_top_filtered, x=eixo_x, y=eixo_y, ax=ax4, palette="coolwarm")
-        ax4.set_title("Distribuição (Boxplot)")
-        ax4.tick_params(axis='x', rotation=45)
-        plt.tight_layout()
-        figs_para_pdf.append(fig4)
-    except Exception as e:
-        # Se falhar, cria um gráfico vazio com aviso, mas NÃO TRAVA O SITE
-        fig4, ax4 = plt.subplots()
-        ax4.text(0.5, 0.5, "Dados insuficientes para Boxplot", ha='center')
-        figs_para_pdf.append(fig4)
-
-    # --- GRÁFICO 5: HEATMAP ---
-    try:
-        fig5, ax5 = plt.subplots(figsize=(6, 5))
-        corr = df[numericas].corr()
-        if corr.shape[0] > 1: # Só desenha se tiver mais de 1 variável
-            sns.heatmap(corr, annot=True, cmap="Reds", fmt=".2f", ax=ax5)
-            ax5.set_title("Correlação")
-        else:
-            ax5.text(0.5, 0.5, "Precisa de 2+ colunas numéricas", ha='center')
-        plt.tight_layout()
-        figs_para_pdf.append(fig5)
     except:
         figs_para_pdf.append(plt.figure())
 
@@ -119,16 +92,14 @@ def render_layout(df, datas, numericas, categoricas, lang="pt"):
     st.markdown("---")
     st.subheader("📊 Análise Visual")
     
-    abas = ["Ranking 🏆", "Share 🍕", "Variabilidade 📦", "Correlação 🔥"]
-    graficos = [fig1, fig3, fig4, fig5]
-    
-    if fig2:
-        abas.insert(1, "Tempo 📈")
-        graficos.insert(1, fig2)
+    abas = ["Ranking 🏆", "Share 🍕", "Evolução 📈"]
+    graficos = [fig1, fig3, fig2]
     
     my_tabs = st.tabs(abas)
     for aba, fig in zip(my_tabs, graficos):
-        with aba: st.pyplot(fig)
+        with aba: 
+            if fig: st.pyplot(fig)
+            else: st.info("Gráfico não disponível para esta seleção.")
 
     st.session_state["figs_pdf"] = figs_para_pdf
     return df_grouped
