@@ -173,4 +173,28 @@ with col_insights:
             idx_x = i
             break
             
-    col_x_ia = st.
+    col_x_ia = st.selectbox("Eixo X (Texto):", opcoes_x, index=idx_x)
+    col_y_ia = st.selectbox("Eixo Y (Valor):", numericas, index=0)
+
+    if st.button("✨ Gerar Análise Automática"):
+        with st.spinner("A IA está analisando todas as abas..."):
+            texto_ia = analisar_com_ia(df, col_x_ia, col_y_ia)
+            st.session_state["analise_ia"] = texto_ia
+            
+    analise_final = st.text_area("Texto do Relatório:", value=st.session_state["analise_ia"], height=300)
+    st.session_state["analise_texto"] = analise_final
+
+    if st.button("📄 Gerar PDF"):
+        st.session_state["pdf_ready"] = True
+
+# --- GERAÇÃO DO PDF ---
+if st.session_state.get("pdf_ready"):
+    figs = st.session_state.get("figs_pdf", [])
+    try:
+        with st.spinner("Gerando PDF..."):
+            pdf_bytes = gerar_pdf(df, df, datas, numericas, categoricas, figs, lang="pt")
+        st.success("PDF Gerado com Sucesso!")
+        st.download_button("⬇️ Baixar PDF Completo", data=pdf_bytes, file_name="Relatorio_Platero_Completo.pdf", mime="application/pdf")
+        st.session_state["pdf_ready"] = False
+    except Exception as e:
+        st.error(f"Erro ao criar PDF: {e}")
