@@ -39,8 +39,19 @@ def gerar_pdf(df, df_filtrado, datas, numericas, categoricas, figs, lang="pt"):
     pdf.ln(5)
     
     pdf.set_font("Arial", size=11)
-    total_val = df[numericas[0]].sum() if numericas else 0
-    media_val = df[numericas[0]].mean() if numericas else 0
+    if numericas:
+    col = numericas[0]
+    serie = pd.to_numeric(df[col], errors="coerce")
+
+    if serie.notna().sum() == 0:
+        total_val = 0
+        media_val = 0
+    else:
+        total_val = serie.sum()
+        media_val = serie.mean()
+else:
+    total_val = 0
+    media_val = 0
     
     pdf.cell(0, 8, f"Total de Registros Analisados: {len(df)}", ln=True)
     pdf.cell(0, 8, f"Volume Total Processado: {total_val:,.2f}", ln=True)
