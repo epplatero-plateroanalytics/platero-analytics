@@ -3,7 +3,7 @@ import pandas as pd
 from cleaner import carregar_e_limpar_inteligente # <--- NOVA FUNÇÃO
 from utils import detectar_tipos
 from layout import render_layout
-from pdf_engine_pro import gerar_pdf_pro
+from pdf_engine_cloud import gerar_pdf_pro
 from ai_analyst import analisar_com_ia
 from database import init_db, salvar_registro, carregar_historico
 
