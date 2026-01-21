@@ -517,4 +517,4 @@ def gerar_pdf_pro(df, df_filtrado, datas, numericas, categoricas, figs, texto_ia
     # ============================================================
     # RETORNO FINAL
     # ============================================================
-    return pdf.output(dest='S').encode('latin-1')
+    return pdf.output(dest='S').encode('utf-8')
