@@ -3,7 +3,7 @@ import pandas as pd
 from cleaner import carregar_e_limpar_inteligente # <--- NOVA FUNÇÃO
 from utils import detectar_tipos
 from layout import render_layout
-from pdf_engine_cloud import gerar_pdf
+from pdf_engine_pro import gerar_pdf_pro
 from ai_analyst import analisar_com_ia
 from database import init_db, salvar_registro, carregar_historico
 
@@ -135,8 +135,54 @@ with col_ia_btn:
 if "analise_ia" in st.session_state:
     st.info(st.session_state["analise_ia"])
 
-# 4. EXPORTAÇÃO
-if st.button("📄 Baixar Relatório PDF Completo"):
-    figs = st.session_state.get("figs_pdf", [])
-    pdf_bytes = gerar_pdf(df, df, datas, numericas, categoricas, figs, lang="pt")
-    st.download_button("⬇️ Download PDF", pdf_bytes, "Relatorio_Platero_Pro.pdf", "application/pdf")
+## 4. EXPORTAÇÃO
+st.markdown("---")
+st.subheader("📄 Exportação do Relatório")
+
+# Card visual
+with st.container():
+    st.markdown("""
+    <div style="
+        background-color: #f8f9fc;
+        padding: 25px;
+        border-radius: 12px;
+        border: 1px solid #e0e0e0;
+        box-shadow: 0px 2px 6px rgba(0,0,0,0.05);
+        ">
+        <h3 style="margin-top: 0; color: #003366;">📘 Relatório Executivo Profissional</h3>
+        <p style="font-size: 15px; color: #444;">
+            Gere um relatório completo com capa, sumário automático, análises avançadas,
+            gráficos, estatísticas e parecer da Inteligência Artificial.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.write("")  # espaçamento
+
+    col_btn1, col_btn2, col_btn3 = st.columns([1,2,1])
+
+    with col_btn2:
+        if st.button("📄 Gerar Relatório PDF", type="primary"):
+            figs = st.session_state.get("figs_pdf", [])
+            texto_ia = st.session_state.get("analise_ia", "")
+
+            with st.spinner("📑 Montando relatório profissional..."):
+                pdf_bytes = gerar_pdf_pro(
+                    df,
+                    df,
+                    datas,
+                    numericas,
+                    categoricas,
+                    figs,
+                    texto_ia
+                )
+
+            st.success("Relatório gerado com sucesso!")
+
+            st.download_button(
+                "⬇️ Baixar Relatório PDF",
+                pdf_bytes,
+                "Relatorio_Platero_Pro.pdf",
+                "application/pdf",
+                type="primary"
+            )
