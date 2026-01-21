@@ -16,7 +16,7 @@ COR_AZUL = (0, 51, 102)       # #003366
 COR_CINZA = (85, 85, 85)      # #555555
 COR_CINZA_CLARO = (220, 220, 220)
 COR_TEXTO = (40, 40, 40)
-FONTE_PADRAO = "Arial"
+FONTE_PADRAO = "DejaVu"
 
 
 # ================================
@@ -322,199 +322,200 @@ def gerar_pdf_pro(df, df_filtrado, datas, numericas, categoricas, figs, texto_ia
     for i, secao in enumerate(secoes, start=1):
         pdf.cell(0, 7, f"{secao}", ln=True)
 
-    # ============================================================
-    # SEÇÃO 1 — RESUMO EXECUTIVO
-    # ============================================================
-    pdf.add_page()
-    pdf.titulo_secao("1. Resumo Executivo", nivel=1)
+# ============================================================
+# SEÇÃO 1 — RESUMO EXECUTIVO
+# ============================================================
+pdf.add_page()
+pdf.titulo_secao("1. Resumo Executivo", nivel=1)
 
-    if numericas:
-        col = numericas[0]
-        kpis = calcular_kpis(df, col)
-
-        pdf.texto_paragrafo(
-            "Esta seção apresenta uma visão geral dos principais indicadores "
-            "extraídos da base de dados analisada."
-        )
-
-        colunas = ["Indicador", "Valor"]
-        linhas = [
-            ["Total Processado", fmt_num(kpis["total"])],
-            ["Média", fmt_num(kpis["media"])],
-            ["Mediana", fmt_num(kpis["mediana"])],
-            ["Desvio Padrão", fmt_num(kpis["desvio"])],
-            ["Mínimo", fmt_num(kpis["minimo"])],
-            ["Máximo", fmt_num(kpis["maximo"])],
-            ["Coef. Variação", fmt_num(kpis["cv"])],
-        ]
-
-        pdf_tabela(pdf, colunas, linhas)
-
-    else:
-        pdf.texto_paragrafo("Nenhuma coluna numérica foi identificada.")
-
-    # ============================================================
-    # SEÇÃO 2 — RANKING E DISTRIBUIÇÃO
-    # ============================================================
-    pdf.add_page()
-    pdf.titulo_secao("2. Ranking e Distribuição", nivel=1)
-
-    if numericas and categoricas:
-        col_val = numericas[0]
-        col_cat = categoricas[0]
-
-        pdf.titulo_secao("Top 10 Categorias", nivel=2)
-
-        linhas_top10 = tabela_top10(df, col_val, col_cat)
-        pdf_tabela(pdf, ["Categoria", "Valor", "Escala"], linhas_top10)
-
-        pdf.ln(5)
-        pdf.titulo_secao("Gráfico de Ranking", nivel=2)
-
-        if len(figs) > 0:
-            pdf.inserir_figura(figs[0], largura=180)
-
-    else:
-        pdf.texto_paragrafo("Não há dados suficientes para gerar ranking.")
-            # ============================================================
-    # SEÇÃO 3 — ANÁLISE TEMPORAL
-    # ============================================================
-    pdf.add_page()
-    pdf.titulo_secao("3. Análise Temporal", nivel=1)
-
-    if datas and numericas:
-        col_data = datas[0]
-        col_val = numericas[0]
-
-        agrupado, crescimento, extremos = analisar_tempo(df, col_data, col_val)
-
-        if agrupado is not None:
-            melhor_mes, pior_mes = extremos
-
-            pdf.texto_paragrafo(
-                "A análise temporal permite identificar tendências, sazonalidade e "
-                "variações relevantes ao longo do tempo."
-            )
-
-            # Tabela de evolução mensal
-            linhas = []
-            for mes, valor in agrupado.items():
-                linhas.append([str(mes), fmt_num(valor)])
-
-            pdf.titulo_secao("Evolução Mensal", nivel=2)
-            pdf_tabela(pdf, ["Mês", "Valor"], linhas)
-
-            # Gráfico temporal (figs[1])
-            if len(figs) > 1:
-                pdf.ln(5)
-                pdf.titulo_secao("Linha do Tempo", nivel=2)
-                pdf.inserir_figura(figs[1], largura=180)
-
-            # Crescimento percentual
-            pdf.ln(5)
-            pdf.titulo_secao("Crescimento Percentual", nivel=2)
-
-            linhas_cres = []
-            for mes, pct in crescimento.items():
-                linhas_cres.append([str(mes), f"{pct*100:.2f}%"])
-
-            pdf_tabela(pdf, ["Mês", "Crescimento"], linhas_cres)
-
-            # Melhor e pior mês
-            pdf.ln(5)
-            pdf.titulo_secao("Melhor e Pior Período", nivel=2)
-            pdf_tabela(
-                pdf,
-                ["Indicador", "Mês"],
-                [
-                    ["Melhor Mês", str(melhor_mes)],
-                    ["Pior Mês", str(pior_mes)],
-                ]
-            )
-
-        else:
-            pdf.texto_paragrafo("Não foi possível gerar análise temporal.")
-    else:
-        pdf.texto_paragrafo("Não há dados suficientes para análise temporal.")
-
-    # ============================================================
-    # SEÇÃO 4 — ESTATÍSTICA AVANÇADA
-    # ============================================================
-    pdf.add_page()
-    pdf.titulo_secao("4. Estatística Avançada", nivel=1)
-
-    if numericas:
-        pdf.titulo_secao("Estatísticas Descritivas", nivel=2)
-        linhas_est = tabela_estatisticas(df, numericas)
-        pdf_tabela(pdf, ["Coluna", "Média", "Mediana", "Desvio", "Mínimo", "Máximo"], linhas_est)
-
-        # Boxplot
-        if len(figs) > 3:
-            pdf.ln(5)
-            pdf.titulo_secao("Distribuição (Boxplot)", nivel=2)
-            pdf.inserir_figura(figs[3], largura=180)
-
-        # Heatmap
-        if len(figs) > 4:
-            pdf.ln(5)
-            pdf.titulo_secao("Mapa de Correlação", nivel=2)
-            pdf.inserir_figura(figs[4], largura=150, x=30)
-
-        # Tabela de correlações
-        pdf.ln(5)
-        pdf.titulo_secao("Top Correlações", nivel=2)
-        linhas_corr = tabela_correlacao(df, numericas)
-        pdf_tabela(pdf, ["Coluna A", "Coluna B", "Correlação"], linhas_corr)
-
-    else:
-        pdf.texto_paragrafo("Nenhuma coluna numérica disponível para estatísticas avançadas.")
-
-    # ============================================================
-    # SEÇÃO 5 — ANÁLISE DE MERCADO (SHARE)
-    # ============================================================
-    pdf.add_page()
-    pdf.titulo_secao("5. Análise de Mercado", nivel=1)
-
-    if len(figs) > 2:
-        pdf.titulo_secao("Participação de Mercado (Top 5)", nivel=2)
-        pdf.inserir_figura(figs[2], largura=150, x=30)
-    else:
-        pdf.texto_paragrafo("Não há dados suficientes para análise de mercado.")
-
-    # ============================================================
-    # SEÇÃO 6 — PARECER DA INTELIGÊNCIA ARTIFICIAL
-    # ============================================================
-    pdf.add_page()
-    pdf.titulo_secao("6. Parecer da Inteligência Artificial", nivel=1)
-
-    if not texto_ia:
-        texto_ia = (
-            "A análise automática não foi fornecida. "
-            "Certifique-se de gerar o parecer antes de exportar o relatório."
-        )
-
-    pdf.texto_paragrafo(texto_ia, tamanho=11)
-
-    # ============================================================
-    # SEÇÃO 7 — ANEXOS
-    # ============================================================
-    pdf.add_page()
-    pdf.titulo_secao("7. Anexos", nivel=1)
+if numericas:
+    col = numericas[0]
+    kpis = calcular_kpis(df, col)
 
     pdf.texto_paragrafo(
-        "Esta seção contém informações adicionais, tabelas completas e dados "
-        "que podem ser úteis para análises complementares."
+        "Esta seção apresenta uma visão geral dos principais indicadores "
+        "extraídos da base de dados analisada."
     )
 
-    # Tabela com primeiras linhas do dataframe
-    pdf.titulo_secao("Prévia dos Dados", nivel=2)
+    colunas = ["Indicador", "Valor"]
+    linhas = [
+        ["Total Processado", fmt_num(kpis["total"])],
+        ["Média", fmt_num(kpis["media"])],
+        ["Mediana", fmt_num(kpis["mediana"])],
+        ["Desvio Padrão", fmt_num(kpis["desvio"])],
+        ["Mínimo", fmt_num(kpis["minimo"])],
+        ["Máximo", fmt_num(kpis["maximo"])],
+        ["Coef. Variação", fmt_num(kpis["cv"])],
+    ]
 
-    preview_cols = list(df.columns)[:6]
-    preview_rows = df[preview_cols].head(10).astype(str).values.tolist()
+    pdf_tabela(pdf, colunas, linhas)
 
-    pdf_tabela(pdf, preview_cols, preview_rows)
+else:
+    pdf.texto_paragrafo("Nenhuma coluna numérica foi identificada.")
 
-    # ============================================================
-    # RETORNO FINAL
-    # ============================================================
-    return pdf.output(dest='S').encode('utf-8')
+# ============================================================
+# SEÇÃO 2 — RANKING E DISTRIBUIÇÃO
+# ============================================================
+pdf.add_page()
+pdf.titulo_secao("2. Ranking e Distribuição", nivel=1)
+
+if numericas and categoricas:
+    col_val = numericas[0]
+    col_cat = categoricas[0]
+
+    pdf.titulo_secao("Top 10 Categorias", nivel=2)
+
+    linhas_top10 = tabela_top10(df, col_val, col_cat)
+    pdf_tabela(pdf, ["Categoria", "Valor", "Escala"], linhas_top10)
+
+    pdf.ln(5)
+    pdf.titulo_secao("Gráfico de Ranking", nivel=2)
+
+    if len(figs) > 0:
+        pdf.inserir_figura(figs[0], largura=180)
+
+else:
+    pdf.texto_paragrafo("Não há dados suficientes para gerar ranking.")
+
+# ============================================================
+# SEÇÃO 3 — ANÁLISE TEMPORAL
+# ============================================================
+pdf.add_page()
+pdf.titulo_secao("3. Análise Temporal", nivel=1)
+
+if datas and numericas:
+    col_data = datas[0]
+    col_val = numericas[0]
+
+    agrupado, crescimento, extremos = analisar_tempo(df, col_data, col_val)
+
+    if agrupado is not None:
+        melhor_mes, pior_mes = extremos
+
+        pdf.texto_paragrafo(
+            "A análise temporal permite identificar tendências, sazonalidade e "
+            "variações relevantes ao longo do tempo."
+        )
+
+        # Tabela de evolução mensal
+        linhas = []
+        for mes, valor in agrupado.items():
+            linhas.append([str(mes), fmt_num(valor)])
+
+        pdf.titulo_secao("Evolução Mensal", nivel=2)
+        pdf_tabela(pdf, ["Mês", "Valor"], linhas)
+
+        # Gráfico temporal
+        if len(figs) > 1:
+            pdf.ln(5)
+            pdf.titulo_secao("Linha do Tempo", nivel=2)
+            pdf.inserir_figura(figs[1], largura=180)
+
+        # Crescimento percentual
+        pdf.ln(5)
+        pdf.titulo_secao("Crescimento Percentual", nivel=2)
+
+        linhas_cres = []
+        for mes, pct in crescimento.items():
+            linhas_cres.append([str(mes), f"{pct*100:.2f}%"])
+
+        pdf_tabela(pdf, ["Mês", "Crescimento"], linhas_cres)
+
+        # Melhor e pior mês
+        pdf.ln(5)
+        pdf.titulo_secao("Melhor e Pior Período", nivel=2)
+        pdf_tabela(
+            pdf,
+            ["Indicador", "Mês"],
+            [
+                ["Melhor Mês", str(melhor_mes)],
+                ["Pior Mês", str(pior_mes)],
+            ]
+        )
+
+    else:
+        pdf.texto_paragrafo("Não foi possível gerar análise temporal.")
+else:
+    pdf.texto_paragrafo("Não há dados suficientes para análise temporal.")
+
+# ============================================================
+# SEÇÃO 4 — ESTATÍSTICA AVANÇADA
+# ============================================================
+pdf.add_page()
+pdf.titulo_secao("4. Estatística Avançada", nivel=1)
+
+if numericas:
+    pdf.titulo_secao("Estatísticas Descritivas", nivel=2)
+    linhas_est = tabela_estatisticas(df, numericas)
+    pdf_tabela(pdf, ["Coluna", "Média", "Mediana", "Desvio", "Mínimo", "Máximo"], linhas_est)
+
+    # Boxplot
+    if len(figs) > 3:
+        pdf.ln(5)
+        pdf.titulo_secao("Distribuição (Boxplot)", nivel=2)
+        pdf.inserir_figura(figs[3], largura=180)
+
+    # Heatmap
+    if len(figs) > 4:
+        pdf.ln(5)
+        pdf.titulo_secao("Mapa de Correlação", nivel=2)
+        pdf.inserir_figura(figs[4], largura=150, x=30)
+
+    # Tabela de correlações
+    pdf.ln(5)
+    pdf.titulo_secao("Top Correlações", nivel=2)
+    linhas_corr = tabela_correlacao(df, numericas)
+    pdf_tabela(pdf, ["Coluna A", "Coluna B", "Correlação"], linhas_corr)
+
+else:
+    pdf.texto_paragrafo("Nenhuma coluna numérica disponível para estatísticas avançadas.")
+
+# ============================================================
+# SEÇÃO 5 — ANÁLISE DE MERCADO
+# ============================================================
+pdf.add_page()
+pdf.titulo_secao("5. Análise de Mercado", nivel=1)
+
+if len(figs) > 2:
+    pdf.titulo_secao("Participação de Mercado (Top 5)", nivel=2)
+    pdf.inserir_figura(figs[2], largura=150, x=30)
+else:
+    pdf.texto_paragrafo("Não há dados suficientes para análise de mercado.")
+
+# ============================================================
+# SEÇÃO 6 — PARECER DA IA
+# ============================================================
+pdf.add_page()
+pdf.titulo_secao("6. Parecer da Inteligência Artificial", nivel=1)
+
+if not texto_ia:
+    texto_ia = (
+        "A análise automática não foi fornecida. "
+        "Certifique-se de gerar o parecer antes de exportar o relatório."
+    )
+
+pdf.texto_paragrafo(texto_ia, tamanho=11)
+
+# ============================================================
+# SEÇÃO 7 — ANEXOS
+# ============================================================
+pdf.add_page()
+pdf.titulo_secao("7. Anexos", nivel=1)
+
+pdf.texto_paragrafo(
+    "Esta seção contém informações adicionais, tabelas completas e dados "
+    "que podem ser úteis para análises complementares."
+)
+
+# Prévia dos dados
+pdf.titulo_secao("Prévia dos Dados", nivel=2)
+
+preview_cols = list(df.columns)[:6]
+preview_rows = df[preview_cols].head(10).astype(str).values.tolist()
+
+pdf_tabela(pdf, preview_cols, preview_rows)
+
+# ============================================================
+# RETORNO FINAL
+# ============================================================
+return pdf.output(dest='S').encode('utf-8', errors='ignore')
