@@ -1,5 +1,3 @@
-# pdf_engine_pro.py
-
 import os
 import tempfile
 from datetime import datetime
@@ -26,10 +24,10 @@ class PDF(FPDF):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # Fonte Unicode (UTF‑8)
+        # Fontes Unicode (UTF‑8)
         self.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
         self.add_font("DejaVu", "B", "DejaVuSans-Bold.ttf", uni=True)
-        self.add_font("DejaVu", "I", "DejaVuSans-Oblique.ttf", uni=True)
+        self.add_font("DejaVu", "I", "DejaVuSans-Oblique.ttf", uni=True)  # ← CORRETO
 
         self.set_auto_page_break(auto=True, margin=15)
         self.alias_nb_pages()
@@ -113,9 +111,7 @@ class PDF(FPDF):
                 self.image(tmp.name, x=x, w=largura, y=y)
             else:
                 self.image(tmp.name, x=x, w=largura)
-
-
-# ================================
+                # ================================
 # FUNÇÕES AUXILIARES
 # ================================
 
