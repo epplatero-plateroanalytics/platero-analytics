@@ -60,7 +60,7 @@ class PDF(FPDF):
 
     def footer(self):
         self.set_y(-15)
-        self.set_font(FONTE_PADRAO, 'I', 8)
+        self.set_font(FONTE_PADRAO, '', 8)
         self.set_text_color(*COR_CINZA)
         self.cell(0, 10, f'Platero Analytics  |  Página {self.page_no()}/{{nb}}', 0, 0, 'C')
 
