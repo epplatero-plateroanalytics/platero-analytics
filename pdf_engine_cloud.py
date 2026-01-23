@@ -221,6 +221,9 @@ def calcular_tendencia(df, coluna_data, coluna_valor):
 
     crescimento = evolucao.pct_change().mean() * 100
     return evolucao, crescimento
+# ============================================================
+# CONTINUAÇÃO DAS FUNÇÕES AUXILIARES
+# ============================================================
 
 def diagnostico_qualidade(df, coluna):
     serie = df[coluna]
@@ -384,8 +387,90 @@ def fig_scatter(df, coluna_x, coluna_y, idx=5):
     ax.set_title(f"Dispersão — {coluna_x} x {coluna_y}")
     plt.tight_layout()
     return fig
+
 # ============================================================
-# TABELAS AVANÇADAS (continuação)
+# TABELAS AVANÇADAS PARA PDF
+# ============================================================
+
+def pdf_tabela(pdf, titulo, colunas, linhas, largura_colunas=None):
+    pdf.titulo_secao(titulo, nivel=3)
+
+    pdf.set_font(FONTE_PADRAO, 'B', 9)
+    pdf.set_text_color(*COR_AZUL)
+
+    if largura_colunas is None:
+        largura_colunas = [190 / len(colunas)] * len(colunas)
+
+    # Cabeçalho
+    for col, w in zip(colunas, largura_colunas):
+        pdf.cell(w, 7, col, border=1, align='C')
+    pdf.ln()
+
+    # Linhas
+    pdf.set_font(FONTE_PADRAO, '', 9)
+    pdf.set_text_color(*COR_TEXTO)
+
+    for linha in linhas:
+        for item, w in zip(linha, largura_colunas):
+            pdf.cell(w, 6, str(item), border=1)
+        pdf.ln()
+
+    pdf.ln(4)
+
+def tabela_top10_pdf(pdf, df, coluna_valor, coluna_categoria):
+    linhas = tabela_top10(df, coluna_valor, coluna_categoria)
+
+    pdf_tabela(
+        pdf,
+        titulo=f"Top 10 — {coluna_categoria}",
+        colunas=["Categoria", "Valor Total", "Representação"],
+        linhas=linhas,
+        largura_colunas=[60, 40, 90]
+    )
+
+def tabela_estatisticas_pdf(pdf, df, colunas_numericas):
+    linhas = tabela_estatisticas(df, colunas_numericas)
+
+    pdf_tabela(
+        pdf,
+        titulo="Estatísticas Descritivas",
+        colunas=["Coluna", "Média", "Mediana", "Desvio", "Mínimo", "Máximo"],
+        linhas=linhas,
+        largura_colunas=[50, 28, 28, 28, 28, 28]
+    )
+
+def tabela_correlacao_pdf(pdf, df, colunas_numericas):
+    linhas = tabela_correlacao(df, colunas_numericas)
+
+    pdf_tabela(
+        pdf,
+        titulo="Correlação Entre Variáveis",
+        colunas=["Variável A", "Variável B", "Correlação"],
+        linhas=linhas,
+        largura_colunas=[60, 60, 30]
+    )
+
+def tabela_outliers_pdf(pdf, outliers_iqr, outliers_z, coluna):
+    linhas = []
+
+    for _, row in outliers_iqr.head(10).iterrows():
+        linhas.append(["IQR", fmt_num(row[coluna])])
+
+    for _, row in outliers_z.head(10).iterrows():
+        linhas.append(["Z-Score", fmt_num(row[coluna])])
+
+    if not linhas:
+        linhas = [["Nenhum", "—"]]
+
+    pdf_tabela(
+        pdf,
+        titulo=f"Outliers — {coluna}",
+        colunas=["Método", "Valor"],
+        linhas=linhas,
+        largura_colunas=[40, 40]
+    )
+    # ============================================================
+# TABELAS AVANÇADAS (CONTINUAÇÃO)
 # ============================================================
 
 def tabela_sazonalidade_pdf(pdf, sazonal):
@@ -401,7 +486,6 @@ def tabela_sazonalidade_pdf(pdf, sazonal):
         largura_colunas=[40, 40]
     )
 
-
 def tabela_tendencia_pdf(pdf, evolucao):
     linhas = []
     for periodo, valor in evolucao.items():
@@ -414,7 +498,6 @@ def tabela_tendencia_pdf(pdf, evolucao):
         linhas=linhas,
         largura_colunas=[50, 40]
     )
-
 
 def tabela_qualidade_pdf(pdf, qualidade):
     linhas = [
@@ -430,9 +513,8 @@ def tabela_qualidade_pdf(pdf, qualidade):
         largura_colunas=[60, 40]
     )
 
-
 # ============================================================
-# SEÇÕES 1 A 7 DO RELATÓRIO
+# SEÇÕES DO RELATÓRIO
 # ============================================================
 
 def secao_capa(pdf, usuario):
@@ -450,7 +532,6 @@ def secao_capa(pdf, usuario):
     pdf.ln(10)
     pdf.set_font(FONTE_PADRAO, '', 11)
     pdf.cell(0, 8, "Gerado automaticamente pelo Platero Analytics", ln=True, align='C')
-
 
 def secao_sumario(pdf):
     pdf.add_page()
@@ -475,7 +556,6 @@ def secao_sumario(pdf):
     for item in secoes:
         pdf.ln(4)
         pdf.cell(0, 6, item)
-
 
 def secao_kpis(pdf, df, coluna_valor):
     pdf.add_page()
@@ -506,7 +586,6 @@ def secao_kpis(pdf, df, coluna_valor):
         largura_colunas=[60, 40]
     )
 
-
 def secao_ranking(pdf, df, coluna_cat, coluna_valor, figs_principais):
     pdf.add_page()
     pdf.titulo_secao("4. Ranking e Distribuição", nivel=1)
@@ -522,7 +601,6 @@ def secao_ranking(pdf, df, coluna_cat, coluna_valor, figs_principais):
         pdf.titulo_secao("Gráfico de Distribuição", nivel=2)
         pdf.inserir_figura(figs_principais[0], largura=170)
 
-
 def secao_estatistica(pdf, df, numericas):
     pdf.add_page()
     pdf.titulo_secao("5. Estatística Avançada", nivel=1)
@@ -533,7 +611,6 @@ def secao_estatistica(pdf, df, numericas):
     )
 
     tabela_estatisticas_pdf(pdf, df, numericas)
-
 
 def secao_temporal(pdf, df, datas, coluna_valor):
     pdf.add_page()
@@ -576,7 +653,6 @@ def secao_temporal(pdf, df, datas, coluna_valor):
         fig = fig_sazonalidade(sazonalidade)
         pdf.inserir_figura(fig, largura=170)
 
-
 def secao_qualidade(pdf, df, coluna_valor):
     pdf.add_page()
     pdf.titulo_secao("7. Qualidade dos Dados", nivel=1)
@@ -588,11 +664,6 @@ def secao_qualidade(pdf, df, coluna_valor):
 
     qualidade = diagnostico_qualidade(df, coluna_valor)
     tabela_qualidade_pdf(pdf, qualidade)
-
-
-# ============================================================
-# SEÇÕES PREMIUM — 8, 9 e 10
-# ============================================================
 
 def secao_pareto(pdf, df, coluna_cat, coluna_valor):
     pdf.add_page()
@@ -615,7 +686,6 @@ def secao_pareto(pdf, df, coluna_cat, coluna_valor):
 
     tabela_top10_pdf(pdf, df, coluna_valor, coluna_cat)
 
-
 def secao_outliers(pdf, df, coluna_valor):
     pdf.add_page()
     pdf.titulo_secao("9. Outliers (IQR + Z-Score)", nivel=1)
@@ -636,7 +706,6 @@ def secao_outliers(pdf, df, coluna_valor):
         "Valores acima do limite superior (IQR) ou com Z-Score acima de 3 "
         "devem ser analisados individualmente."
     )
-
 
 def secao_correlacao_sazonalidade_tendencia(pdf, df, numericas, datas, coluna_valor):
     pdf.add_page()
@@ -685,7 +754,6 @@ def secao_correlacao_sazonalidade_tendencia(pdf, df, numericas, datas, coluna_va
             pdf.inserir_figura(fig_tend, largura=170)
 
             tabela_tendencia_pdf(pdf, evolucao)
-
 
 # ============================================================
 # FUNÇÃO PRINCIPAL — GERAR PDF COMPLETO
