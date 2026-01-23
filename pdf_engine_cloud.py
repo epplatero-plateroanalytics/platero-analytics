@@ -35,7 +35,8 @@ def escolher_paleta(i):
 class PDF(FPDF):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-add_fon
+
+        # FONTES NA RAIZ DO PROJETO
         self.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
         self.add_font("DejaVu", "B", "DejaVuSans-Bold.ttf", uni=True)
         self.add_font("DejaVu", "I", "DejaVuSans-Oblique.ttf", uni=True)
@@ -177,6 +178,9 @@ def detectar_outliers(df, coluna):
         outliers_z = pd.DataFrame()
 
     return outliers_iqr, outliers_z, limite_sup
+# ============================================================
+# CONTINUAÇÃO DAS FUNÇÕES AUXILIARES
+# ============================================================
 
 def calcular_correlacoes(df, numericas, coluna_alvo):
     try:
@@ -185,45 +189,6 @@ def calcular_correlacoes(df, numericas, coluna_alvo):
         return corr.drop(coluna_alvo).head(10)
     except:
         return None
-
-def calcular_sazonalidade(df, coluna_data, coluna_valor):
-    df_temp = df.copy()
-    df_temp[coluna_data] = pd.to_datetime(df_temp[coluna_data], errors="coerce")
-    df_temp[coluna_valor] = pd.to_numeric(df_temp[coluna_valor], errors="coerce")
-
-    df_temp = df_temp.dropna(subset=[coluna_data, coluna_valor])
-    if df_temp.empty:
-        return None
-
-    df_temp["mes"] = df_temp[coluna_data].dt.month
-    sazonal = df_temp.groupby("mes")[coluna_valor].mean()
-
-    if sazonal.empty:
-        return None
-
-    mes_top = sazonal.idxmax()
-    return sazonal, mes_top
-
-def calcular_tendencia(df, coluna_data, coluna_valor):
-    df_temp = df.copy()
-    df_temp[coluna_data] = pd.to_datetime(df_temp[coluna_data], errors="coerce")
-    df_temp[coluna_valor] = pd.to_numeric(df_temp[coluna_valor], errors="coerce")
-
-    df_temp = df_temp.dropna(subset=[coluna_data, coluna_valor])
-    if df_temp.empty:
-        return None
-
-    df_temp["mes"] = df_temp[coluna_data].dt.to_period("M")
-    evolucao = df_temp.groupby("mes")[coluna_valor].sum()
-
-    if len(evolucao) < 2:
-        return None
-
-    crescimento = evolucao.pct_change().mean() * 100
-    return evolucao, crescimento
-# ============================================================
-# CONTINUAÇÃO DAS FUNÇÕES AUXILIARES
-# ============================================================
 
 def diagnostico_qualidade(df, coluna):
     serie = df[coluna]
@@ -401,12 +366,10 @@ def pdf_tabela(pdf, titulo, colunas, linhas, largura_colunas=None):
     if largura_colunas is None:
         largura_colunas = [190 / len(colunas)] * len(colunas)
 
-    # Cabeçalho
     for col, w in zip(colunas, largura_colunas):
         pdf.cell(w, 7, col, border=1, align='C')
     pdf.ln()
 
-    # Linhas
     pdf.set_font(FONTE_PADRAO, '', 9)
     pdf.set_text_color(*COR_TEXTO)
 
@@ -427,8 +390,7 @@ def tabela_top10_pdf(pdf, df, coluna_valor, coluna_categoria):
         linhas=linhas,
         largura_colunas=[60, 40, 90]
     )
-
-def tabela_estatisticas_pdf(pdf, df, colunas_numericas):
+    def tabela_estatisticas_pdf(pdf, df, colunas_numericas):
     linhas = tabela_estatisticas(df, colunas_numericas)
 
     pdf_tabela(
@@ -469,9 +431,6 @@ def tabela_outliers_pdf(pdf, outliers_iqr, outliers_z, coluna):
         linhas=linhas,
         largura_colunas=[40, 40]
     )
-    # ============================================================
-# TABELAS AVANÇADAS (CONTINUAÇÃO)
-# ============================================================
 
 def tabela_sazonalidade_pdf(pdf, sazonal):
     linhas = []
@@ -611,8 +570,7 @@ def secao_estatistica(pdf, df, numericas):
     )
 
     tabela_estatisticas_pdf(pdf, df, numericas)
-
-def secao_temporal(pdf, df, datas, coluna_valor):
+    def secao_temporal(pdf, df, datas, coluna_valor):
     pdf.add_page()
     pdf.titulo_secao("6. Análise Temporal", nivel=1)
 
