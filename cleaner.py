@@ -8,6 +8,7 @@ def encontrar_linha_cabecalho(df_temp):
     max_cols = 0
     melhor_linha = 0
 
+    # 1. Tenta achar a linha com mais colunas preenchidas
     for i in range(limite):
         linha = df_temp.iloc[i]
         cols_preenchidas = linha.count()
@@ -15,9 +16,11 @@ def encontrar_linha_cabecalho(df_temp):
             max_cols = cols_preenchidas
             melhor_linha = i
 
+    # 2. Se não encontrou nada convincente, tenta achar palavras-chave
     if max_cols <= 1:
         for i in range(limite):
-            txt = df_temp.iloc[i].astype(str).str.upper().sum()
+            linha = df_temp.iloc[i].astype(str).str.upper().tolist()
+            txt = " ".join(linha)  # ← CORREÇÃO APLICADA AQUI
             if any(x in txt for x in ['DATA', 'VALOR', 'VENDAS', 'ANO', 'CLIENTE']):
                 return i
 

@@ -3,11 +3,16 @@ import tempfile
 from datetime import datetime
 
 import pandas as pd
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import seaborn as sns
 from fpdf import FPDF
 
-# ================================
+# ============================================================
 # CONFIGURAÇÕES GERAIS
-# ================================
+# ============================================================
 
 COR_AZUL = (0, 51, 102)
 COR_CINZA = (85, 85, 85)
@@ -15,19 +20,25 @@ COR_CINZA_CLARO = (220, 220, 220)
 COR_TEXTO = (40, 40, 40)
 FONTE_PADRAO = "DejaVu"
 
+PALETAS = [
+    "viridis", "plasma", "inferno", "magma", "cividis",
+    "coolwarm", "Spectral", "Set2", "Accent", "tab20"
+]
 
-# ================================
-# CLASSE PDF COM DESIGN CORPORATIVO
-# ================================
+def escolher_paleta(i):
+    return PALETAS[i % len(PALETAS)]
+
+# ============================================================
+# CLASSE PDF
+# ============================================================
 
 class PDF(FPDF):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # Fontes Unicode (UTF‑8)
         self.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
         self.add_font("DejaVu", "B", "DejaVuSans-Bold.ttf", uni=True)
-        self.add_font("DejaVu", "I", "DejaVuSans-Oblique.ttf", uni=True)  # ← CORRETO
+        self.add_font("DejaVu", "I", "DejaVuSans-Oblique.ttf", uni=True)
 
         self.set_auto_page_break(auto=True, margin=15)
         self.alias_nb_pages()
@@ -38,8 +49,8 @@ class PDF(FPDF):
         self.set_xy(0, 110)
         self.cell(0, 10, 'PLATERO ANALYTICS', align='C')
 
-        if os.path.exists('logo.png'):
-            self.image('logo.png', 10, 8, w=28)
+        if os.path.exists('assets/logo.png'):
+            self.image('assets/logo.png', 10, 8, w=28)
 
         self.set_y(12)
         self.set_text_color(*COR_AZUL)
@@ -111,9 +122,10 @@ class PDF(FPDF):
                 self.image(tmp.name, x=x, w=largura, y=y)
             else:
                 self.image(tmp.name, x=x, w=largura)
-                # ================================
-# FUNÇÕES AUXILIARES
-# ================================
+
+# ============================================================
+# FUNÇÕES AUXILIARES PREMIUM
+# ============================================================
 
 def fmt_num(x):
     try:
@@ -133,6 +145,101 @@ def calcular_kpis(df, coluna):
         "cv": (serie.std(skipna=True) / serie.mean(skipna=True)) if serie.mean(skipna=True) != 0 else 0
     }
 
+def calcular_pareto(df, coluna_cat, coluna_valor):
+    df_temp = df.copy()
+    df_temp[coluna_valor] = pd.to_numeric(df_temp[coluna_valor], errors="coerce")
+
+    agrupado = df_temp.groupby(coluna_cat)[coluna_valor].sum().sort_values(ascending=False)
+    total = agrupado.sum()
+
+    acumulado = (agrupado.cumsum() / total).reset_index()
+    acumulado.columns = [coluna_cat, "acumulado"]
+
+    categorias_pareto = acumulado[acumulado["acumulado"] <= 0.80][coluna_cat].tolist()
+
+    return agrupado, acumulado, categorias_pareto
+
+def detectar_outliers(df, coluna):
+    serie = pd.to_numeric(df[coluna], errors="coerce")
+
+    q1 = serie.quantile(0.25)
+    q3 = serie.quantile(0.75)
+    iqr = q3 - q1
+    limite_sup = q3 + 1.5 * iqr
+    outliers_iqr = df[serie > limite_sup]
+
+    media = serie.mean()
+    desvio = serie.std()
+    if desvio > 0:
+        z_scores = (serie - media) / desvio
+        outliers_z = df[z_scores > 3]
+    else:
+        outliers_z = pd.DataFrame()
+
+    return outliers_iqr, outliers_z, limite_sup
+
+def calcular_correlacoes(df, numericas, coluna_alvo):
+    try:
+        df_num = df[numericas].apply(lambda x: pd.to_numeric(x, errors="coerce"))
+        corr = df_num.corr()[coluna_alvo].sort_values(ascending=False)
+        return corr.drop(coluna_alvo).head(10)
+    except:
+        return None
+
+def calcular_sazonalidade(df, coluna_data, coluna_valor):
+    df_temp = df.copy()
+    df_temp[coluna_data] = pd.to_datetime(df_temp[coluna_data], errors="coerce")
+    df_temp[coluna_valor] = pd.to_numeric(df_temp[coluna_valor], errors="coerce")
+
+    df_temp = df_temp.dropna(subset=[coluna_data, coluna_valor])
+    if df_temp.empty:
+        return None
+
+    df_temp["mes"] = df_temp[coluna_data].dt.month
+    sazonal = df_temp.groupby("mes")[coluna_valor].mean()
+
+    if sazonal.empty:
+        return None
+
+    mes_top = sazonal.idxmax()
+    return sazonal, mes_top
+
+def calcular_tendencia(df, coluna_data, coluna_valor):
+    df_temp = df.copy()
+    df_temp[coluna_data] = pd.to_datetime(df_temp[coluna_data], errors="coerce")
+    df_temp[coluna_valor] = pd.to_numeric(df_temp[coluna_valor], errors="coerce")
+
+    df_temp = df_temp.dropna(subset=[coluna_data, coluna_valor])
+    if df_temp.empty:
+        return None
+
+    df_temp["mes"] = df_temp[coluna_data].dt.to_period("M")
+    evolucao = df_temp.groupby("mes")[coluna_valor].sum()
+
+    if len(evolucao) < 2:
+        return None
+
+    crescimento = evolucao.pct_change().mean() * 100
+    return evolucao, crescimento
+
+def diagnostico_qualidade(df, coluna):
+    serie = df[coluna]
+    nulos = serie.isna().sum()
+    total = len(df)
+    perc_nulos = (nulos / total * 100) if total > 0 else 0
+
+    return {
+        "nulos": nulos,
+        "perc_nulos": perc_nulos
+    }
+
+def calcular_distribuicao(df, coluna):
+    serie = pd.to_numeric(df[coluna], errors="coerce")
+    return {
+        "assimetria": serie.skew(skipna=True),
+        "curtose": serie.kurtosis(skipna=True)
+    }
+
 def tabela_top10(df, coluna_valor, coluna_categoria):
     serie_val = pd.to_numeric(df[coluna_valor], errors="coerce")
     df_temp = df.copy()
@@ -148,24 +255,6 @@ def tabela_top10(df, coluna_valor, coluna_categoria):
         linhas.append([categoria, fmt_num(valor), barra])
 
     return linhas
-
-def analisar_tempo(df, coluna_data, coluna_valor):
-    df_temp = df.copy()
-    df_temp[coluna_data] = pd.to_datetime(df_temp[coluna_data], errors="coerce")
-    df_temp[coluna_valor] = pd.to_numeric(df_temp[coluna_valor], errors="coerce")
-    df_temp = df_temp.dropna(subset=[coluna_data, coluna_valor])
-
-    df_temp["mes"] = df_temp[coluna_data].dt.to_period("M")
-    agrupado = df_temp.groupby("mes")[coluna_valor].sum()
-
-    if len(agrupado) == 0:
-        return None, None, None
-
-    crescimento = agrupado.pct_change().fillna(0)
-    melhor_mes = agrupado.idxmax()
-    pior_mes = agrupado.idxmin()
-
-    return agrupado, crescimento, (melhor_mes, pior_mes)
 
 def tabela_estatisticas(df, colunas_numericas):
     linhas = []
@@ -194,239 +283,452 @@ def tabela_correlacao(df, colunas_numericas):
     linhas.sort(key=lambda x: abs(float(x[2])), reverse=True)
     return linhas[:15]
 
-def pdf_tabela(pdf, colunas, linhas, largura_total=190, altura_linha=6):
-    pdf.set_font(FONTE_PADRAO, 'B', 10)
-    pdf.set_fill_color(*COR_CINZA_CLARO)
+# ============================================================
+# GRÁFICOS AVANÇADOS
+# ============================================================
 
-    largura_col = largura_total / len(colunas)
+def fig_pareto(agrupado, acumulado, coluna_cat, coluna_valor, idx=0):
+    paleta = escolher_paleta(idx)
+    fig, ax1 = plt.subplots(figsize=(8, 4))
 
-    for col in colunas:
-        pdf.cell(largura_col, altura_linha, col, border=1, align='C', fill=True)
-    pdf.ln(altura_linha)
+    ax1.bar(agrupado.index, agrupado.values, color=sns.color_palette(paleta, len(agrupado)))
+    ax1.set_ylabel(coluna_valor)
+    ax1.set_xticklabels(agrupado.index, rotation=45, ha='right')
 
-    pdf.set_font(FONTE_PADRAO, '', 9)
-    pdf.set_fill_color(245, 245, 245)
+    ax2 = ax1.twinx()
+    ax2.plot(acumulado[coluna_cat], acumulado["acumulado"], color="red", marker="o")
+    ax2.set_ylabel("Acumulado (%)")
+    ax2.set_ylim(0, 1.05)
 
-    alterna = False
-    for linha in linhas:
-        alterna = not alterna
-        for item in linha:
-            pdf.cell(largura_col, altura_linha, str(item), border=1, align='C', fill=alterna)
-        pdf.ln(altura_linha)
+    plt.title("Pareto 80/20")
+    plt.tight_layout()
+    return fig
+
+def fig_outliers(df, coluna, limite_sup, idx=1):
+    paleta = escolher_paleta(idx)
+    fig, ax = plt.subplots(figsize=(6, 4))
+
+    sns.boxplot(
+        y=pd.to_numeric(df[coluna], errors="coerce"),
+        color=sns.color_palette(paleta, 3)[1],
+        ax=ax
+    )
+
+    ax.axhline(limite_sup, color="red", linestyle="--", label="Limite Superior (IQR)")
+    ax.legend()
+    ax.set_title(f"Outliers — {coluna}")
+    plt.tight_layout()
+    return fig
+
+def fig_correlacao(df, numericas, idx=2):
+    paleta = escolher_paleta(idx)
+    df_num = df[numericas].apply(lambda x: pd.to_numeric(x, errors="coerce"))
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    sns.heatmap(df_num.corr(), annot=True, cmap=paleta, fmt=".2f", ax=ax)
+    ax.set_title("Mapa de Correlação")
+    plt.tight_layout()
+    return fig
+
+def fig_sazonalidade(sazonal, idx=3):
+    paleta = escolher_paleta(idx)
+    fig, ax = plt.subplots(figsize=(7, 4))
+
+    meses = list(range(1, 13))
+    valores = [sazonal.get(m, 0) for m in meses]
+
+    ax.plot(meses, valores, marker="o", color=sns.color_palette(paleta, 12)[4])
+    ax.set_xticks(meses)
+    ax.set_title("Sazonalidade — Média por Mês")
+    ax.set_xlabel("Mês")
+    ax.set_ylabel("Valor Médio")
+    plt.tight_layout()
+    return fig
+
+def fig_tendencia(evolucao, idx=4):
+    paleta = escolher_paleta(idx)
+    fig, ax = plt.subplots(figsize=(7, 4))
+
+    ax.plot(evolucao.index.astype(str), evolucao.values,
+            marker="o", color=sns.color_palette(paleta, 12)[7])
+
+    ax.set_title("Tendência Temporal")
+    ax.set_xlabel("Período (Mês)")
+    ax.set_ylabel("Total")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    return fig
+
+def fig_scatter(df, coluna_x, coluna_y, idx=5):
+    paleta = escolher_paleta(idx)
+    fig, ax = plt.subplots(figsize=(6, 4))
+
+    df_temp = df.copy()
+    df_temp[coluna_x] = pd.to_numeric(df_temp[coluna_x], errors="coerce")
+    df_temp[coluna_y] = pd.to_numeric(df_temp[coluna_y], errors="coerce")
+    df_temp = df_temp.dropna(subset=[coluna_x, coluna_y])
+
+    sns.scatterplot(
+        data=df_temp,
+        x=coluna_x,
+        y=coluna_y,
+        color=sns.color_palette(paleta, 10)[3],
+        ax=ax
+    )
+
+    if len(df_temp) > 2:
+        z = np.polyfit(df_temp[coluna_x], df_temp[coluna_y], 1)
+        p = np.poly1d(z)
+        ax.plot(df_temp[coluna_x], p(df_temp[coluna_x]), "r--")
+
+    ax.set_title(f"Dispersão — {coluna_x} x {coluna_y}")
+    plt.tight_layout()
+    return fig
+# ============================================================
+# TABELAS AVANÇADAS (continuação)
+# ============================================================
+
+def tabela_sazonalidade_pdf(pdf, sazonal):
+    linhas = []
+    for mes, valor in sazonal.items():
+        linhas.append([mes, fmt_num(valor)])
+
+    pdf_tabela(
+        pdf,
+        titulo="Sazonalidade — Média por Mês",
+        colunas=["Mês", "Valor Médio"],
+        linhas=linhas,
+        largura_colunas=[40, 40]
+    )
 
 
-# ================================
-# FUNÇÃO PRINCIPAL
-# ================================
+def tabela_tendencia_pdf(pdf, evolucao):
+    linhas = []
+    for periodo, valor in evolucao.items():
+        linhas.append([str(periodo), fmt_num(valor)])
 
-def gerar_pdf_pro(df, df_filtrado, datas, numericas, categoricas, figs, texto_ia=""):
-    pdf = PDF()
+    pdf_tabela(
+        pdf,
+        titulo="Tendência Temporal — Evolução por Mês",
+        colunas=["Período", "Total"],
+        linhas=linhas,
+        largura_colunas=[50, 40]
+    )
 
-    # CAPA
+
+def tabela_qualidade_pdf(pdf, qualidade):
+    linhas = [
+        ["Valores Nulos", qualidade["nulos"]],
+        ["% Nulos", f"{qualidade['perc_nulos']:.1f}%"]
+    ]
+
+    pdf_tabela(
+        pdf,
+        titulo="Qualidade dos Dados",
+        colunas=["Indicador", "Valor"],
+        linhas=linhas,
+        largura_colunas=[60, 40]
+    )
+
+
+# ============================================================
+# SEÇÕES 1 A 7 DO RELATÓRIO
+# ============================================================
+
+def secao_capa(pdf, usuario):
     pdf.add_page()
+    pdf.set_y(140)
     pdf.set_font(FONTE_PADRAO, 'B', 28)
     pdf.set_text_color(*COR_AZUL)
-    pdf.ln(40)
-    pdf.cell(0, 15, "RELATÓRIO EXECUTIVO", ln=True, align='C')
+    pdf.cell(0, 12, "Relatório Executivo Completo", ln=True, align='C')
 
     pdf.set_font(FONTE_PADRAO, '', 14)
     pdf.set_text_color(*COR_CINZA)
-    pdf.cell(0, 10, "Análise Estratégica e Insights Avançados", ln=True, align='C')
+    pdf.ln(4)
+    pdf.cell(0, 10, f"Cliente: {usuario}", ln=True, align='C')
 
-    pdf.ln(20)
-    pdf.set_font(FONTE_PADRAO, '', 12)
-    pdf.set_text_color(*COR_TEXTO)
-    pdf.cell(0, 8, f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align='C')
+    pdf.ln(10)
+    pdf.set_font(FONTE_PADRAO, '', 11)
+    pdf.cell(0, 8, "Gerado automaticamente pelo Platero Analytics", ln=True, align='C')
 
-    # SUMÁRIO
+
+def secao_sumario(pdf):
     pdf.add_page()
     pdf.titulo_secao("Sumário", nivel=1)
 
     secoes = [
-        "1. Resumo Executivo",
-        "2. Ranking e Distribuição",
-        "3. Análise Temporal",
-        "4. Estatística Avançada",
-        "5. Análise de Mercado",
-        "6. Parecer da Inteligência Artificial",
-        "7. Anexos"
+        "1. Capa",
+        "2. Sumário",
+        "3. Visão Geral e KPIs",
+        "4. Ranking e Distribuição",
+        "5. Estatística Avançada",
+        "6. Análise Temporal",
+        "7. Qualidade dos Dados",
+        "8. Pareto 80/20",
+        "9. Outliers (IQR + Z-Score)",
+        "10. Correlação, Sazonalidade e Tendência"
     ]
 
     pdf.set_font(FONTE_PADRAO, '', 11)
     pdf.set_text_color(*COR_TEXTO)
 
-    for secao in secoes:
-        pdf.cell(0, 7, secao, ln=True)
+    for item in secoes:
+        pdf.ln(4)
+        pdf.cell(0, 6, item)
 
-    # SEÇÃO 1 — RESUMO EXECUTIVO
+
+def secao_kpis(pdf, df, coluna_valor):
     pdf.add_page()
-    pdf.titulo_secao("1. Resumo Executivo", nivel=1)
+    pdf.titulo_secao("3. Visão Geral e KPIs", nivel=1)
 
-    if numericas:
-        col = numericas[0]
-        kpis = calcular_kpis(df, col)
-
-        pdf.texto_paragrafo(
-            "Esta seção apresenta uma visão geral dos principais indicadores "
-            "extraídos da base de dados analisada."
-        )
-
-        colunas = ["Indicador", "Valor"]
-        linhas = [
-            ["Total Processado", fmt_num(kpis["total"])],
-            ["Média", fmt_num(kpis["media"])],
-            ["Mediana", fmt_num(kpis["mediana"])],
-            ["Desvio Padrão", fmt_num(kpis["desvio"])],
-            ["Mínimo", fmt_num(kpis["minimo"])],
-            ["Máximo", fmt_num(kpis["maximo"])],
-            ["Coef. Variação", fmt_num(kpis["cv"])],
-        ]
-
-        pdf_tabela(pdf, colunas, linhas)
-
-    else:
-        pdf.texto_paragrafo("Nenhuma coluna numérica foi identificada.")
-
-    # SEÇÃO 2 — RANKING E DISTRIBUIÇÃO
-    pdf.add_page()
-    pdf.titulo_secao("2. Ranking e Distribuição", nivel=1)
-
-    if numericas and categoricas:
-        col_val = numericas[0]
-        col_cat = categoricas[0]
-
-        pdf.titulo_secao("Top 10 Categorias", nivel=2)
-        linhas_top10 = tabela_top10(df, col_val, col_cat)
-        pdf_tabela(pdf, ["Categoria", "Valor", "Escala"], linhas_top10)
-
-        pdf.ln(5)
-        pdf.titulo_secao("Gráfico de Ranking", nivel=2)
-
-        if len(figs) > 0:
-            pdf.inserir_figura(figs[0], largura=180)
-
-    else:
-        pdf.texto_paragrafo("Não há dados suficientes para gerar ranking.")
-
-    # SEÇÃO 3 — ANÁLISE TEMPORAL
-    pdf.add_page()
-    pdf.titulo_secao("3. Análise Temporal", nivel=1)
-
-    if datas and numericas:
-        col_data = datas[0]
-        col_val = numericas[0]
-
-        agrupado, crescimento, extremos = analisar_tempo(df, col_data, col_val)
-
-        if agrupado is not None:
-            melhor_mes, pior_mes = extremos
-
-            pdf.texto_paragrafo(
-                "A análise temporal permite identificar tendências, sazonalidade e "
-                "variações relevantes ao longo do tempo."
-            )
-
-            linhas = []
-            for mes, valor in agrupado.items():
-                linhas.append([str(mes), fmt_num(valor)])
-
-            pdf.titulo_secao("Evolução Mensal", nivel=2)
-            pdf_tabela(pdf, ["Mês", "Valor"], linhas)
-
-            if len(figs) > 1:
-                pdf.ln(5)
-                pdf.titulo_secao("Linha do Tempo", nivel=2)
-                pdf.inserir_figura(figs[1], largura=180)
-
-            pdf.ln(5)
-            pdf.titulo_secao("Crescimento Percentual", nivel=2)
-
-            linhas_cres = []
-            for mes, pct in crescimento.items():
-                linhas_cres.append([str(mes), f"{pct*100:.2f}%"])
-
-            pdf_tabela(pdf, ["Mês", "Crescimento"], linhas_cres)
-
-            pdf.ln(5)
-            pdf.titulo_secao("Melhor e Pior Período", nivel=2)
-            pdf_tabela(
-                pdf,
-                ["Indicador", "Mês"],
-                [
-                    ["Melhor Mês", str(melhor_mes)],
-                    ["Pior Mês", str(pior_mes)],
-                ]
-            )
-
-        else:
-            pdf.texto_paragrafo("Não foi possível gerar análise temporal.")
-    else:
-        pdf.texto_paragrafo("Não há dados suficientes para análise temporal.")
-
-    # SEÇÃO 4 — ESTATÍSTICA AVANÇADA
-    pdf.add_page()
-    pdf.titulo_secao("4. Estatística Avançada", nivel=1)
-
-    if numericas:
-        pdf.titulo_secao("Estatísticas Descritivas", nivel=2)
-        linhas_est = tabela_estatisticas(df, numericas)
-        pdf_tabela(pdf, ["Coluna", "Média", "Mediana", "Desvio", "Mínimo", "Máximo"], linhas_est)
-
-        if len(figs) > 3:
-            pdf.ln(5)
-            pdf.titulo_secao("Distribuição (Boxplot)", nivel=2)
-            pdf.inserir_figura(figs[3], largura=180)
-
-        if len(figs) > 4:
-            pdf.ln(5)
-            pdf.titulo_secao("Mapa de Correlação", nivel=2)
-            pdf.inserir_figura(figs[4], largura=150, x=30)
-
-        pdf.ln(5)
-        pdf.titulo_secao("Top Correlações", nivel=2)
-        linhas_corr = tabela_correlacao(df, numericas)
-        pdf_tabela(pdf, ["Coluna A", "Coluna B", "Correlação"], linhas_corr)
-
-    else:
-        pdf.texto_paragrafo("Nenhuma coluna numérica disponível para estatísticas avançadas.")
-
-    # SEÇÃO 5 — ANÁLISE DE MERCADO
-    pdf.add_page()
-    pdf.titulo_secao("5. Análise de Mercado", nivel=1)
-
-    if len(figs) > 2:
-        pdf.titulo_secao("Participação de Mercado (Top 5)", nivel=2)
-        pdf.inserir_figura(figs[2], largura=150, x=30)
-    else:
-        pdf.texto_paragrafo("Não há dados suficientes para análise de mercado.")
-
-    # SEÇÃO 6 — PARECER DA IA
-    pdf.add_page()
-    pdf.titulo_secao("6. Parecer da Inteligência Artificial", nivel=1)
-
-    if not texto_ia:
-        texto_ia = (
-            "A análise automática não foi fornecida. "
-            "Certifique-se de gerar o parecer antes de exportar o relatório."
-        )
-
-    pdf.texto_paragrafo(texto_ia, tamanho=11)
-
-    # SEÇÃO 7 — ANEXOS
-    pdf.add_page()
-    pdf.titulo_secao("7. Anexos", nivel=1)
+    kpis = calcular_kpis(df, coluna_valor)
 
     pdf.texto_paragrafo(
-        "Esta seção contém informações adicionais, tabelas completas e dados "
-        "que podem ser úteis para análises complementares."
+        "Esta seção apresenta uma visão executiva dos principais indicadores "
+        "da base de dados, permitindo uma leitura rápida do cenário geral."
     )
 
-    pdf.titulo_secao("Prévia dos Dados", nivel=2)
+    linhas = [
+        ["Total", fmt_num(kpis["total"])],
+        ["Média", fmt_num(kpis["media"])],
+        ["Mediana", fmt_num(kpis["mediana"])],
+        ["Desvio Padrão", fmt_num(kpis["desvio"])],
+        ["Coeficiente de Variação", f"{kpis['cv']*100:.1f}%"],
+        ["Mínimo", fmt_num(kpis["minimo"])],
+        ["Máximo", fmt_num(kpis["maximo"])]
+    ]
 
-    preview_cols = list(df.columns)[:6]
-    preview_rows = df[preview_cols].head(10).astype(str).values.tolist()
+    pdf_tabela(
+        pdf,
+        titulo="KPIs Principais",
+        colunas=["Indicador", "Valor"],
+        linhas=linhas,
+        largura_colunas=[60, 40]
+    )
 
-    pdf_tabela(pdf, preview_cols, preview_rows)
 
-    # RETORNO FINAL
-    return pdf.output(dest='S').encode('utf-8', errors='ignore')
+def secao_ranking(pdf, df, coluna_cat, coluna_valor, figs_principais):
+    pdf.add_page()
+    pdf.titulo_secao("4. Ranking e Distribuição", nivel=1)
+
+    pdf.texto_paragrafo(
+        "Aqui analisamos a distribuição dos valores por categoria, "
+        "identificando os principais grupos que concentram resultados."
+    )
+
+    tabela_top10_pdf(pdf, df, coluna_valor, coluna_cat)
+
+    if figs_principais:
+        pdf.titulo_secao("Gráfico de Distribuição", nivel=2)
+        pdf.inserir_figura(figs_principais[0], largura=170)
+
+
+def secao_estatistica(pdf, df, numericas):
+    pdf.add_page()
+    pdf.titulo_secao("5. Estatística Avançada", nivel=1)
+
+    pdf.texto_paragrafo(
+        "Nesta seção avaliamos a variabilidade, dispersão e comportamento "
+        "estatístico das variáveis numéricas."
+    )
+
+    tabela_estatisticas_pdf(pdf, df, numericas)
+
+
+def secao_temporal(pdf, df, datas, coluna_valor):
+    pdf.add_page()
+    pdf.titulo_secao("6. Análise Temporal", nivel=1)
+
+    if not datas:
+        pdf.texto_paragrafo("Nenhuma coluna de data foi identificada na base.")
+        return
+
+    coluna_data = datas[0]
+
+    pdf.texto_paragrafo(
+        f"A análise temporal utiliza a coluna '{coluna_data}' para identificar "
+        "padrões ao longo do tempo."
+    )
+
+    tendencia = calcular_tendencia(df, coluna_data, coluna_valor)
+    if tendencia:
+        evolucao, crescimento = tendencia
+
+        pdf.titulo_secao("Tendência", nivel=2)
+        pdf.texto_paragrafo(
+            f"A tendência média mensal é de {crescimento:.1f}%. "
+            "Valores positivos indicam crescimento; negativos indicam retração."
+        )
+
+        fig = fig_tendencia(evolucao)
+        pdf.inserir_figura(fig, largura=170)
+
+    sazonal = calcular_sazonalidade(df, coluna_data, coluna_valor)
+    if sazonal:
+        sazonalidade, mes_top = sazonal
+
+        pdf.titulo_secao("Sazonalidade", nivel=2)
+        pdf.texto_paragrafo(
+            f"O mês com maior média histórica é {mes_top}. "
+            "Isso pode indicar padrões sazonais relevantes."
+        )
+
+        fig = fig_sazonalidade(sazonalidade)
+        pdf.inserir_figura(fig, largura=170)
+
+
+def secao_qualidade(pdf, df, coluna_valor):
+    pdf.add_page()
+    pdf.titulo_secao("7. Qualidade dos Dados", nivel=1)
+
+    pdf.texto_paragrafo(
+        "Esta seção avalia a integridade da base, identificando valores nulos "
+        "e possíveis problemas de consistência."
+    )
+
+    qualidade = diagnostico_qualidade(df, coluna_valor)
+    tabela_qualidade_pdf(pdf, qualidade)
+
+
+# ============================================================
+# SEÇÕES PREMIUM — 8, 9 e 10
+# ============================================================
+
+def secao_pareto(pdf, df, coluna_cat, coluna_valor):
+    pdf.add_page()
+    pdf.titulo_secao("8. Pareto 80/20", nivel=1)
+
+    pdf.texto_paragrafo(
+        "A análise de Pareto identifica quais categorias concentram a maior "
+        "parte do resultado total."
+    )
+
+    agrupado, acumulado, categorias_pareto = calcular_pareto(df, coluna_cat, coluna_valor)
+
+    fig = fig_pareto(agrupado, acumulado, coluna_cat, coluna_valor)
+    pdf.inserir_figura(fig, largura=170)
+
+    pdf.texto_paragrafo(
+        f"As categorias que compõem 80% do total são: "
+        f"{', '.join(categorias_pareto)}."
+    )
+
+    tabela_top10_pdf(pdf, df, coluna_valor, coluna_cat)
+
+
+def secao_outliers(pdf, df, coluna_valor):
+    pdf.add_page()
+    pdf.titulo_secao("9. Outliers (IQR + Z-Score)", nivel=1)
+
+    pdf.texto_paragrafo(
+        "Outliers são valores que se afastam significativamente do padrão "
+        "geral dos dados."
+    )
+
+    outliers_iqr, outliers_z, limite_sup = detectar_outliers(df, coluna_valor)
+
+    fig = fig_outliers(df, coluna_valor, limite_sup)
+    pdf.inserir_figura(fig, largura=150)
+
+    tabela_outliers_pdf(pdf, outliers_iqr, outliers_z, coluna_valor)
+
+    pdf.texto_paragrafo(
+        "Valores acima do limite superior (IQR) ou com Z-Score acima de 3 "
+        "devem ser analisados individualmente."
+    )
+
+
+def secao_correlacao_sazonalidade_tendencia(pdf, df, numericas, datas, coluna_valor):
+    pdf.add_page()
+    pdf.titulo_secao("10. Correlação, Sazonalidade e Tendência", nivel=1)
+
+    pdf.titulo_secao("Correlação Entre Variáveis", nivel=2)
+    pdf.texto_paragrafo(
+        "A correlação identifica relações lineares entre variáveis numéricas."
+    )
+
+    if len(numericas) > 1:
+        fig_corr = fig_correlacao(df, numericas)
+        pdf.inserir_figura(fig_corr, largura=170)
+
+        tabela_correlacao_pdf(pdf, df, numericas)
+
+    if datas:
+        coluna_data = datas[0]
+
+        pdf.titulo_secao("Sazonalidade", nivel=2)
+        sazonal = calcular_sazonalidade(df, coluna_data, coluna_valor)
+
+        if sazonal:
+            sazonalidade, mes_top = sazonal
+
+            pdf.texto_paragrafo(
+                f"O mês com maior média histórica é {mes_top}."
+            )
+
+            fig_saz = fig_sazonalidade(sazonalidade)
+            pdf.inserir_figura(fig_saz, largura=170)
+
+            tabela_sazonalidade_pdf(pdf, sazonalidade)
+
+        pdf.titulo_secao("Tendência Temporal", nivel=2)
+        tendencia = calcular_tendencia(df, coluna_data, coluna_valor)
+
+        if tendencia:
+            evolucao, crescimento = tendencia
+
+            pdf.texto_paragrafo(
+                f"A tendência média mensal é de {crescimento:.1f}%."
+            )
+
+            fig_tend = fig_tendencia(evolucao)
+            pdf.inserir_figura(fig_tend, largura=170)
+
+            tabela_tendencia_pdf(pdf, evolucao)
+
+
+# ============================================================
+# FUNÇÃO PRINCIPAL — GERAR PDF COMPLETO
+# ============================================================
+
+def gerar_pdf_pro(
+    df_original,
+    df_limpo,
+    datas,
+    numericas,
+    categoricas,
+    figs_principais,
+    texto_ia,
+    usuario="Cliente"
+):
+    pdf = PDF(orientation='P', unit='mm', format='A4')
+
+    secao_capa(pdf, usuario)
+    secao_sumario(pdf)
+
+    coluna_valor = numericas[0]
+    coluna_cat = categoricas[0] if categoricas else df_limpo.columns[0]
+
+    secao_kpis(pdf, df_limpo, coluna_valor)
+    secao_ranking(pdf, df_limpo, coluna_cat, coluna_valor, figs_principais)
+    secao_estatistica(pdf, df_limpo, numericas)
+    secao_temporal(pdf, df_limpo, datas, coluna_valor)
+    secao_qualidade(pdf, df_limpo, coluna_valor)
+    secao_pareto(pdf, df_limpo, coluna_cat, coluna_valor)
+    secao_outliers(pdf, df_limpo, coluna_valor)
+    secao_correlacao_sazonalidade_tendencia(pdf, df_limpo, numericas, datas, coluna_valor)
+
+    pdf.add_page()
+    pdf.titulo_secao("Parecer da Inteligência Artificial", nivel=1)
+
+    if texto_ia:
+        pdf.texto_paragrafo(texto_ia, tamanho=11)
+    else:
+        pdf.texto_paragrafo("Nenhuma análise adicional da IA foi fornecida.", tamanho=11)
+
+    pdf_bytes = pdf.output(dest='S').encode('latin-1')
+
+    import gc
+    gc.collect()
+
+    return pdf_bytes

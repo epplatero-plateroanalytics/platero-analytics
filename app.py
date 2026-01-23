@@ -1,16 +1,20 @@
 import streamlit as st
 import pandas as pd
-from cleaner import carregar_e_limpar_inteligente # <--- NOVA FUNÇÃO
+
+from cleaner import carregar_e_limpar_inteligente
 from utils import detectar_tipos
 from layout import render_layout
 from pdf_engine_cloud import gerar_pdf_pro
 from ai_analyst import analisar_com_ia
 from database import init_db, salvar_registro, carregar_historico
 
+# ============================================================
+# CONFIGURAÇÃO INICIAL
+# ============================================================
+
 st.set_page_config(page_title="Platero Analytics PRO", page_icon="📊", layout="wide")
 init_db()
 
-# --- CSS PARA VISUAL PROFISSIONAL ---
 st.markdown("""
 <style>
     .metric-card {background-color: #f0f2f6; padding: 20px; border-radius: 10px; text-align: center;}
@@ -18,37 +22,56 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- LOGIN (MANTIDO IGUAL) ---
+# ============================================================
+# LOGIN
+# ============================================================
+
 def check_password():
-    if st.session_state.get("password_correct", False): return True
+    if st.session_state.get("password_correct", False):
+        return True
+
     def password_entered():
         if "passwords" in st.secrets and st.session_state["password"] in st.secrets["passwords"].values():
             st.session_state["password_correct"] = True
-            st.session_state["username"] = [k for k,v in st.secrets["passwords"].items() if v==st.session_state["password"]][0]
+            st.session_state["username"] = [
+                k for k, v in st.secrets["passwords"].items() if v == st.session_state["password"]
+            ][0]
             del st.session_state["password"]
-        else: st.session_state["password_correct"] = False
+        else:
+            st.session_state["password_correct"] = False
 
-    col1, col2, col3 = st.columns([1,2,1])
+    col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("### 🔒 Acesso Corporativo")
         st.text_input("Chave de Acesso:", type="password", on_change=password_entered, key="password")
-        if "password_correct" in st.session_state: st.error("Chave inválida.")
+        if "password_correct" in st.session_state:
+            st.error("Chave inválida.")
+
     return False
 
-if not check_password(): st.stop()
+if not check_password():
+    st.stop()
+
 usuario_atual = st.session_state.get("username", "Cliente")
 
-# --- APP PRINCIPAL ---
+# ============================================================
+# CABEÇALHO
+# ============================================================
+
 col_logo, col_titulo = st.columns([1, 6])
 with col_titulo:
     st.title(f"Painel Executivo — {usuario_atual.title()}")
+
 st.markdown("---")
 
-# --- SIDEBAR ---
+# ============================================================
+# SIDEBAR
+# ============================================================
+
 with st.sidebar:
     st.header("📂 Central de Arquivos")
     arquivo = st.file_uploader("Carregar Base de Dados (Excel/CSV)", type=["xlsx", "csv"])
-    
+
     st.markdown("---")
     if st.checkbox("Ver Histórico de Processamento"):
         st.dataframe(carregar_historico(usuario_atual))
@@ -57,9 +80,11 @@ if not arquivo:
     st.info("👋 Bem-vindo! Arraste sua planilha para começar a análise automática.")
     st.stop()
 
-# --- CARREGAMENTO INTELIGENTE (O SEGREDO) ---
+# ============================================================
+# CARREGAMENTO INTELIGENTE
+# ============================================================
+
 with st.spinner("🔄 O Motor Platero está analisando a estrutura do arquivo..."):
-    # Chama a nova função do cleaner.py
     df, erro = carregar_e_limpar_inteligente(arquivo)
 
 if erro:
@@ -70,76 +95,99 @@ if df.empty:
     st.warning("O arquivo parece vazio ou não contém dados legíveis.")
     st.stop()
 
-# Detecta tipos automaticamente
-datas, numericas, categoricas = detectar_tipos(df)
+# ============================================================
+# DETECÇÃO DE TIPOS (ULTRA-PREMIUM)
+# ============================================================
+
+tipos = detectar_tipos(df)
+
+datas = tipos["datas"]
+numericas = tipos["numericas"]
+categoricas = tipos["categoricas"]
+monetarias = tipos["monetarias"]
+quantidades = tipos["quantidades"]
+booleanas = tipos["booleanas"]
+texto_livre = tipos["texto_livre"]
 
 if not numericas:
-    st.error("⚠️ Identificamos os dados, mas não achamos colunas de VALOR (Dinheiro/Quantidade). Verifique se a planilha tem números.")
+    st.error("⚠️ Identificamos os dados, mas não achamos colunas numéricas. Verifique se a planilha tem números.")
     st.stop()
 
-# --- DASHBOARD EXECUTIVO (VISUAL MELHORADO) ---
+# ============================================================
+# KPIs PRINCIPAIS
+# ============================================================
 
-# 1. KPIs (Indicadores Principais)
 st.subheader("📈 Visão Geral")
+
 col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
 
 valor_total = df[numericas[0]].sum()
 media_valor = df[numericas[0]].mean()
 total_linhas = len(df)
 
-with col_kpi1: st.metric("Faturamento Total / Volume", f"R$ {valor_total:,.2f}")
-with col_kpi2: st.metric("Ticket Médio", f"R$ {media_valor:,.2f}")
-with col_kpi3: st.metric("Registros Processados", f"{total_linhas}")
+with col_kpi1:
+    st.metric("Total / Faturamento / Volume", f"{valor_total:,.2f}")
+
+with col_kpi2:
+    st.metric("Média / Ticket Médio", f"{media_valor:,.2f}")
+
+with col_kpi3:
+    st.metric("Registros Processados", f"{total_linhas}")
 
 st.markdown("---")
 
-# 2. ÁREA DE GRÁFICOS
+# ============================================================
+# ÁREA DE GRÁFICOS
+# ============================================================
+
 col_grafico, col_config = st.columns([3, 1])
 
 with col_config:
     st.markdown("### ⚙️ Ajuste Fino")
-    
-    # Tenta sugerir o Eixo X inteligentemente
+
+    # Sugestão inteligente de eixo X
     index_padrao = 0
-    if "Origem_Aba" in df.columns: # Se tiver abas (anos), sugere usar elas
-        try: index_padrao = list(df.columns).index("Origem_Aba")
-        except: pass
-    elif datas: # Se não, sugere a Data
-        try: index_padrao = list(df.columns).index(datas[0])
-        except: pass
-        
+    if "Origem_Aba" in df.columns:
+        index_padrao = list(df.columns).index("Origem_Aba")
+    elif datas:
+        index_padrao = list(df.columns).index(datas[0])
+
     eixo_x_view = st.selectbox("Agrupar Dados Por:", list(df.columns), index=index_padrao)
     eixo_y_view = st.selectbox("Métrica Analisada:", numericas, index=0)
-    
-    # Checkbox para salvar
+
     chave_salvo = f"save_{arquivo.name}_{len(df)}"
     if chave_salvo not in st.session_state:
         salvar_registro(usuario_atual, arquivo.name, df, eixo_y_view)
         st.session_state[chave_salvo] = True
 
 with col_grafico:
-    # Chama o renderizador visual
     df_agrupado = render_layout(df, datas, numericas, categoricas, lang="pt")
 
-# 3. INTELIGÊNCIA ARTIFICIAL
+# ============================================================
+# CONSULTOR VIRTUAL (IA PREMIUM)
+# ============================================================
+
 st.markdown("---")
-st.subheader("🤖 Consultor Virtual")
+st.subheader("🤖 Consultor Virtual — Análise Avançada")
+
 col_ia_txt, col_ia_btn = st.columns([4, 1])
 
 with col_ia_btn:
-    if st.button("✨ Analisar com IA", type="primary"):
-        with st.spinner("Lendo padrões e redigindo relatório..."):
+    if st.button("✨ Analisar com IA Premium", type="primary"):
+        with st.spinner("Lendo padrões, detectando anomalias e gerando relatório avançado..."):
             analise = analisar_com_ia(df, eixo_x_view, eixo_y_view)
             st.session_state["analise_ia"] = analise
 
 if "analise_ia" in st.session_state:
     st.info(st.session_state["analise_ia"])
 
-## 4. EXPORTAÇÃO
+# ============================================================
+# EXPORTAÇÃO DO RELATÓRIO
+# ============================================================
+
 st.markdown("---")
 st.subheader("📄 Exportação do Relatório")
 
-# Card visual
 with st.container():
     st.markdown("""
     <div style="
@@ -152,14 +200,14 @@ with st.container():
         <h3 style="margin-top: 0; color: #003366;">📘 Relatório Executivo Profissional</h3>
         <p style="font-size: 15px; color: #444;">
             Gere um relatório completo com capa, sumário automático, análises avançadas,
-            gráficos, estatísticas e parecer da Inteligência Artificial.
+            gráficos, estatísticas e parecer da Inteligência Artificial Premium.
         </p>
     </div>
     """, unsafe_allow_html=True)
 
-    st.write("")  # espaçamento
+    st.write("")
 
-    col_btn1, col_btn2, col_btn3 = st.columns([1,2,1])
+    col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
 
     with col_btn2:
         if st.button("📄 Gerar Relatório PDF", type="primary"):
