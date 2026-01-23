@@ -20,7 +20,14 @@ def analisar_com_ia(df, eixo_x, eixo_y):
     # ============================================================
     # 1. AGRUPAMENTO E CONCENTRAÇÃO
     # ============================================================
-    agrupado = df_temp.groupby(eixo_x)[eixo_y].sum().sort_values(ascending=False)
+    agrupado = (
+        df_temp.groupby(eixo_x)[eixo_y]
+        .sum(min_count=1)
+        .sort_values(ascending=False)
+    )
+
+    if len(agrupado) == 0:
+        return "Não foi possível gerar análise: agrupamento vazio."
 
     maior_cat = agrupado.index[0]
     maior_val = agrupado.iloc[0]
@@ -29,10 +36,10 @@ def analisar_com_ia(df, eixo_x, eixo_y):
     # ============================================================
     # 2. PARETO 80/20
     # ============================================================
-    acumulado = agrupado.cumsum() / total
+    acumulado = agrupado.cumsum() / total if total > 0 else agrupado * 0
     categorias_pareto = acumulado[acumulado <= 0.80].index.tolist()
     qtd_pareto = len(categorias_pareto)
-    perc_pareto = (qtd_pareto / len(agrupado)) * 100 if len(agrupado) > 0 else 0
+    perc_pareto = (qtd_pareto / len(agrupado) * 100) if len(agrupado) > 0 else 0
 
     # ============================================================
     # 3. OUTLIERS (IQR + Z-SCORE)
@@ -42,10 +49,10 @@ def analisar_com_ia(df, eixo_x, eixo_y):
     iqr = q3 - q1
     limite_sup = q3 + 1.5 * iqr
 
-    outliers_iqr = df_temp[df_temp[eixo_y] > limite_sup]
+    outliers_iqr = df_temp[serie > limite_sup]
     qtd_outliers_iqr = len(outliers_iqr)
 
-    z_scores = (serie - media) / desvio if desvio > 0 else pd.Series([0]*len(serie))
+    z_scores = (serie - media) / desvio if desvio > 0 else pd.Series([0] * len(serie))
     outliers_z = df_temp[z_scores > 3]
     qtd_outliers_z = len(outliers_z)
 
@@ -61,8 +68,9 @@ def analisar_com_ia(df, eixo_x, eixo_y):
     correlacoes = None
     try:
         df_num = df.select_dtypes(include=[np.number])
-        corr = df_num.corr()[eixo_y].sort_values(ascending=False)
-        correlacoes = corr.drop(eixo_y).head(3)
+        if eixo_y in df_num.columns and len(df_num.columns) > 1:
+            corr = df_num.corr()[eixo_y].drop(eixo_y).sort_values(ascending=False)
+            correlacoes = corr.head(3)
     except:
         pass
 
@@ -74,7 +82,7 @@ def analisar_com_ia(df, eixo_x, eixo_y):
     datas_validas = None
 
     for col in df.columns:
-        if any(x in col.upper() for x in ["DATA", "DATE", "VENC"]):
+        if any(x in col.upper() for x in ["DATA", "DATE", "VENC", "EMISS"]):
             datas_validas = col
             break
 
@@ -99,8 +107,12 @@ def analisar_com_ia(df, eixo_x, eixo_y):
             # Sazonalidade
             df_tempo["mes_num"] = df_tempo[datas_validas].dt.month
             sazonal = df_tempo.groupby("mes_num")[eixo_y].mean()
-            mes_top = sazonal.idxmax()
-            sazonalidade_texto = f"O mês com maior média histórica é **{mes_top}**, sugerindo possível sazonalidade."
+
+            if len(sazonal) > 0:
+                mes_top = sazonal.idxmax()
+                sazonalidade_texto = (
+                    f"O mês com maior média histórica é **{mes_top}**, indicando possível sazonalidade."
+                )
 
     # ============================================================
     # 7. QUALIDADE DOS DADOS
@@ -111,7 +123,6 @@ def analisar_com_ia(df, eixo_x, eixo_y):
     # ============================================================
     # TEXTO FINAL — ULTRA PREMIUM
     # ============================================================
-
     texto = f"""
 📌 **Resumo Executivo Avançado**
 
@@ -127,7 +138,7 @@ def analisar_com_ia(df, eixo_x, eixo_y):
 • Isso indica forte concentração em poucos grupos.
 
 📌 **Pareto 80/20**
-• Apenas **{qtd_pareto} categorias** ({perc_pareto:.1f}%) respondem por **80%** do resultado.  
+• **{qtd_pareto} categorias** ({perc_pareto:.1f}%) respondem por **80%** do resultado.  
 • Focar nesses grupos tende a gerar maior impacto estratégico.
 
 📌 **Outliers e Anomalias**
@@ -138,11 +149,9 @@ def analisar_com_ia(df, eixo_x, eixo_y):
 📌 **Distribuição Estatística**
 • Assimetria: {assimetria:.2f}  
 • Curtose: {curtose:.2f}  
-• Isso ajuda a entender se os dados têm caudas longas, picos ou distorções.
-
 """
 
-    if correlacoes is not None:
+    if correlacoes is not None and len(correlacoes) > 0:
         texto += "📌 **Correlação com outras variáveis**\n"
         for col, val in correlacoes.items():
             texto += f"• Correlação com **{col}**: {val:.2f}\n"
