@@ -35,10 +35,10 @@ def escolher_paleta(i):
 class PDF(FPDF):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
+add_fon
         self.add_font("DejaVu", "", "DejaVuSans.ttf", uni=True)
-        self.add_font("DejaVu", "B", "DejaVuSans-Bold.ttf", uni=True)
-        self.add_font("DejaVu", "I", "DejaVuSans-Oblique.ttf", uni=True)
+self.add_font("DejaVu", "B", "DejaVuSans-Bold.ttf", uni=True)
+self.add_font("DejaVu", "I", "DejaVuSans-Oblique.ttf", uni=True)
 
         self.set_auto_page_break(auto=True, margin=15)
         self.alias_nb_pages()
