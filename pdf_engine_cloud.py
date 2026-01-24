@@ -129,6 +129,6 @@ def gerar_pdf_pro(
     else:
         pdf.paragrafo("Nenhum parecer de IA foi fornecido para esta análise.")
 
-    # IMPORTANTE: não usar encode("latin-1") aqui
-    pdf_bytes = pdf.output(dest="S").encode("latin-1", "ignore")
+    # EXPORTAÇÃO DO PDF
+    pdf_bytes = pdf.output()   # fpdf2 retorna bytes corretos
     return pdf_bytes

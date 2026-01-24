@@ -3,9 +3,9 @@ pandas
 numpy
 matplotlib
 seaborn
-fpdf
 openpyxl
 Pillow
 sqlalchemy
 openai
 python-dotenv
+fpdf2
