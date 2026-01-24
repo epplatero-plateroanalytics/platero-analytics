@@ -1,14 +1,60 @@
 import streamlit as st
 import pandas as pd
 import io
+import re
 
-# Importações locais - Certifique-se que estes arquivos existem na mesma pasta
+# Importações locais
 from cleaner import carregar_e_limpar_inteligente
 from utils import detectar_tipos
 from layout import render_layout
 from pdf_engine_cloud import gerar_pdf_pro
 from ai_analyst import analisar_com_ia
 from database import init_db, salvar_registro, carregar_historico
+
+# ============================================================
+# FUNÇÃO DE LIMPEZA FORÇADA DE NÚMEROS
+# ============================================================
+def limpar_coluna_numerica(serie):
+    """
+    Tenta converter uma coluna de texto/bagunçada para números decimais corretos.
+    Lida com R$, pontos de milhar e vírgulas decimais.
+    """
+    # 1. Se já for número, devolve como está (mas verifica se não é gigante)
+    if pd.api.types.is_numeric_dtype(serie):
+        # Correção de segurança para leituras erradas (ex: 10^11 vezes maior)
+        mediana = serie.median()
+        if median > 1e14: # Se mediana > 100 Trilhões
+             return serie / 1e11 # Tenta ajustar escala (heurística)
+        return serie
+
+    # 2. Converte para string e limpa
+    serie_clean = serie.astype(str).str.strip()
+    
+    # Remove símbolos de moeda e espaços
+    serie_clean = serie_clean.str.replace(r'[R$\s]', '', regex=True)
+
+    def converter_valor(val):
+        if not val or val.lower() == 'nan' or val == 'None':
+            return None
+            
+        # Remove caracteres que não sejam números, ponto ou vírgula
+        val = re.sub(r'[^\d.,-]', '', val)
+        
+        # Lógica para decidir Decimal vs Milhar
+        if ',' in val and '.' in val:
+            # Caso Brasileiro (1.234,56) -> Tira ponto, troca vírgula por ponto
+            val = val.replace('.', '').replace(',', '.')
+        elif ',' in val:
+            # Caso apenas vírgula (1234,56) -> Troca por ponto
+            val = val.replace(',', '.')
+        # Caso apenas ponto (1234.56) -> Mantém
+        
+        try:
+            return float(val)
+        except:
+            return None
+
+    return serie_clean.apply(converter_valor)
 
 # ============================================================
 # CONFIGURAÇÃO INICIAL
@@ -18,7 +64,7 @@ st.set_page_config(page_title="Platero Analytics PRO", page_icon="📊", layout=
 try:
     init_db()
 except:
-    pass # Ignora erro de DB se não estiver configurado localmente
+    pass 
 
 st.markdown("""
 <style>
@@ -45,7 +91,6 @@ def check_password():
         else:
             st.session_state["password_correct"] = False
 
-    # Se não houver secrets configurados, libera acesso direto (para testes locais)
     if "passwords" not in st.secrets:
         return True
 
@@ -55,7 +100,6 @@ def check_password():
         st.text_input("Chave de Acesso:", type="password", on_change=password_entered, key="password")
         if "password_correct" in st.session_state:
             st.error("Chave inválida.")
-
     return False
 
 if not check_password():
@@ -81,11 +125,12 @@ with st.sidebar:
     st.header("📂 Central de Arquivos")
     arquivo = st.file_uploader("Carregar Base de Dados (Excel/CSV)", type=["xlsx", "csv"])
     
-    usar_modo_seguro = st.checkbox("🛠️ Modo Seguro (Carregamento Simples)", 
-                                  help="Marque se os números aparecerem gigantes ou errados.")
+    usar_modo_seguro = st.checkbox("🛠️ Modo Seguro (Limpeza Forçada)", 
+                                  value=True,
+                                  help="Ative se os números estiverem gigantes ou errados.")
 
     st.markdown("---")
-    if st.checkbox("Ver Histórico de Processamento"):
+    if st.checkbox("Ver Histórico"):
         try:
             st.dataframe(carregar_historico(usuario_atual))
         except:
@@ -96,7 +141,7 @@ if not arquivo:
     st.stop()
 
 # ============================================================
-# LÓGICA DE CARREGAMENTO
+# LÓGICA DE CARREGAMENTO (ROBUSTA)
 # ============================================================
 
 df = pd.DataFrame()
@@ -105,15 +150,27 @@ erro = None
 with st.spinner("🔄 Processando arquivo..."):
     if usar_modo_seguro:
         try:
+            # Lê TUDO como texto (dtype=str) para evitar conversão errada automática
             if arquivo.name.endswith('.csv'):
                 try:
-                    df = pd.read_csv(arquivo, sep=None, engine='python')
+                    df = pd.read_csv(arquivo, sep=None, engine='python', dtype=str)
                 except:
                     arquivo.seek(0)
-                    df = pd.read_csv(arquivo, sep=',')
+                    df = pd.read_csv(arquivo, sep=',', dtype=str)
             else:
-                df = pd.read_excel(arquivo)
-            df = df.convert_dtypes()
+                df = pd.read_excel(arquivo, dtype=str)
+            
+            # Tenta converter colunas que parecem números
+            for col in df.columns:
+                # Pega amostra para ver se tem cara de número
+                amostra = df[col].dropna().head(10).astype(str).str.cat()
+                if any(char.isdigit() for char in amostra):
+                    # Tenta converter
+                    col_convertida = limpar_coluna_numerica(df[col])
+                    # Se mais da metade virou número válido, aceita a conversão
+                    if col_convertida.notna().sum() > (len(df) * 0.5):
+                        df[col] = col_convertida
+
         except Exception as e:
             erro = f"Erro no modo seguro: {e}"
     else:
@@ -132,14 +189,8 @@ if df.empty:
 # ============================================================
 
 tipos = detectar_tipos(df)
-
-datas = tipos["datas"]
-numericas = tipos["numericas"]
+datas, numericas = tipos["datas"], tipos["numericas"]
 categoricas = tipos["categoricas"]
-monetarias = tipos["monetarias"]
-quantidades = tipos["quantidades"]
-booleanas = tipos["booleanas"]
-texto_livre = tipos["texto_livre"]
 
 if not numericas:
     st.error("⚠️ Identificamos os dados, mas não achamos colunas numéricas.")
@@ -153,19 +204,22 @@ st.subheader("📈 Visão Geral")
 
 col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
 
+# Garante KPI padrão seguro
 col_kpi_padrao = numericas[0]
+if "VENDAS" in numericas: col_kpi_padrao = "VENDAS" # Preferência inteligente
+
 valor_total = df[col_kpi_padrao].sum()
 media_valor = df[col_kpi_padrao].mean()
 total_linhas = len(df)
 
 with col_kpi1:
-    st.metric("Total Geral", f"{valor_total:,.2f}")
+    st.metric(f"Total ({col_kpi_padrao})", f"{valor_total:,.2f}")
 
 with col_kpi2:
-    st.metric("Média Geral", f"{media_valor:,.2f}")
+    st.metric("Média", f"{media_valor:,.2f}")
 
 with col_kpi3:
-    st.metric("Registros Processados", f"{total_linhas}")
+    st.metric("Registros", f"{total_linhas}")
 
 st.markdown("---")
 
@@ -179,20 +233,20 @@ with col_config:
     st.markdown("### ⚙️ Ajuste Fino")
 
     index_padrao = 0
-    if "Origem_Aba" in df.columns:
-        index_padrao = list(df.columns).index("Origem_Aba")
-    elif datas:
-        index_padrao = list(df.columns).index(datas[0])
+    if datas: index_padrao = list(df.columns).index(datas[0])
+    elif "ANO" in df.columns: index_padrao = list(df.columns).index("ANO")
 
     eixo_x_view = st.selectbox("Agrupar Dados Por:", list(df.columns), index=index_padrao)
-    eixo_y_view = st.selectbox("Métrica Analisada:", numericas, index=0)
+    
+    # Seleção inteligente do índice numérico
+    idx_num = 0
+    if "VENDAS" in numericas: idx_num = numericas.index("VENDAS")
+    eixo_y_view = st.selectbox("Métrica Analisada:", numericas, index=idx_num)
 
     chave_salvo = f"save_{arquivo.name}_{len(df)}"
     if chave_salvo not in st.session_state:
-        try:
-            salvar_registro(usuario_atual, arquivo.name, df, eixo_y_view)
-        except:
-            pass
+        try: salvar_registro(usuario_atual, arquivo.name, df, eixo_y_view)
+        except: pass
         st.session_state[chave_salvo] = True
 
 with col_grafico:
@@ -203,13 +257,13 @@ with col_grafico:
 # ============================================================
 
 st.markdown("---")
-st.subheader("🤖 Consultor Virtual — Análise Avançada")
+st.subheader("🤖 Consultor Virtual")
 
 col_ia_txt, col_ia_btn = st.columns([4, 1])
 
 with col_ia_btn:
-    if st.button("✨ Analisar com IA Premium", type="primary"):
-        with st.spinner("Lendo padrões..."):
+    if st.button("✨ Analisar com IA", type="primary"):
+        with st.spinner("Analisando..."):
             analise = analisar_com_ia(df, eixo_x_view, eixo_y_view)
             st.session_state["analise_ia"] = analise
 
@@ -217,54 +271,45 @@ if "analise_ia" in st.session_state:
     st.info(st.session_state["analise_ia"])
 
 # ============================================================
-# EXPORTAÇÃO DO RELATÓRIO
+# EXPORTAÇÃO
 # ============================================================
 
 st.markdown("---")
-st.subheader("📄 Exportação do Relatório")
+st.subheader("📄 Exportação")
 
-with st.container():
-    st.markdown("""
-    <div style="background-color: #f8f9fc; padding: 25px; border-radius: 12px; border: 1px solid #e0e0e0;">
-        <h3 style="margin-top: 0; color: #003366;">📘 Relatório Executivo Profissional</h3>
-        <p style="font-size: 15px; color: #444;">Gere um relatório completo em PDF.</p>
-    </div>
-    """, unsafe_allow_html=True)
+col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
 
-    st.write("")
-    col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
+if "pdf_bytes" not in st.session_state:
+    st.session_state["pdf_bytes"] = None
 
-    if "pdf_bytes" not in st.session_state:
-        st.session_state["pdf_bytes"] = None
+with col_btn2:
+    if st.button("📄 Gerar Relatório PDF", type="primary"):
+        figs = st.session_state.get("figs_pdf", [])
+        texto_ia = st.session_state.get("analise_ia", "")
 
-    with col_btn2:
-        if st.button("📄 Gerar Relatório PDF", type="primary"):
-            figs = st.session_state.get("figs_pdf", [])
-            texto_ia = st.session_state.get("analise_ia", "")
+        with st.spinner("Gerando PDF..."):
+            try:
+                pdf_data = gerar_pdf_pro(
+                    df_original=df,
+                    df_limpo=df,
+                    datas=datas,
+                    numericas=numericas,
+                    categoricas=categoricas,
+                    figs_principais=figs,
+                    texto_ia=texto_ia,
+                    usuario=usuario_atual,
+                    coluna_alvo=eixo_y_view
+                )
+                st.session_state["pdf_bytes"] = bytes(pdf_data)
+                st.success("Sucesso! Baixe abaixo.")
+            except Exception as e:
+                st.error(f"Erro no PDF: {e}")
 
-            with st.spinner("📑 Montando relatório..."):
-                try:
-                    pdf_data = gerar_pdf_pro(
-                        df_original=df,
-                        df_limpo=df,
-                        datas=datas,
-                        numericas=numericas,
-                        categoricas=categoricas,
-                        figs_principais=figs,
-                        texto_ia=texto_ia,
-                        usuario=usuario_atual,
-                        coluna_alvo=eixo_y_view
-                    )
-                    st.session_state["pdf_bytes"] = bytes(pdf_data)
-                    st.success("Relatório gerado!")
-                except Exception as e:
-                    st.error(f"Erro ao gerar PDF: {e}")
-
-        if st.session_state["pdf_bytes"] is not None:
-            st.download_button(
-                label="⬇️ Baixar Relatório PDF",
-                data=st.session_state["pdf_bytes"],
-                file_name="Relatorio_Platero_Pro.pdf",
-                mime="application/pdf",
-                type="primary"
-            )
+    if st.session_state["pdf_bytes"] is not None:
+        st.download_button(
+            "⬇️ Baixar PDF",
+            st.session_state["pdf_bytes"],
+            "Relatorio_Platero_Pro.pdf",
+            "application/pdf",
+            type="primary"
+        )
