@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 
-# Importações dos seus módulos (mantive igual)
+# Importações dos seus módulos locais
 from cleaner import carregar_e_limpar_inteligente
 from utils import detectar_tipos
 from layout import render_layout
@@ -24,7 +24,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================
-# LOGIN
+# LOGIN (Auth Simples)
 # ============================================================
 
 def check_password():
@@ -34,7 +34,7 @@ def check_password():
     def password_entered():
         if "passwords" in st.secrets and st.session_state["password"] in st.secrets["passwords"].values():
             st.session_state["password_correct"] = True
-            # Encontra a chave (usuário) baseada no valor (senha)
+            # Identifica o usuário pela senha
             st.session_state["username"] = [
                 k for k, v in st.secrets["passwords"].items() if v == st.session_state["password"]
             ][0]
@@ -98,7 +98,7 @@ if df.empty:
     st.stop()
 
 # ============================================================
-# DETECÇÃO DE TIPOS (ULTRA-PREMIUM)
+# DETECÇÃO DE TIPOS
 # ============================================================
 
 tipos = detectar_tipos(df)
@@ -116,22 +116,24 @@ if not numericas:
     st.stop()
 
 # ============================================================
-# KPIs PRINCIPAIS
+# KPIs PRINCIPAIS (Topo da Página)
 # ============================================================
 
 st.subheader("📈 Visão Geral")
 
 col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
 
-valor_total = df[numericas[0]].sum()
-media_valor = df[numericas[0]].mean()
+# Aqui usamos a primeira numérica por padrão apenas para o KPI inicial
+col_kpi_padrao = numericas[0]
+valor_total = df[col_kpi_padrao].sum()
+media_valor = df[col_kpi_padrao].mean()
 total_linhas = len(df)
 
 with col_kpi1:
-    st.metric("Total / Faturamento / Volume", f"{valor_total:,.2f}")
+    st.metric("Total Geral", f"{valor_total:,.2f}")
 
 with col_kpi2:
-    st.metric("Média / Ticket Médio", f"{media_valor:,.2f}")
+    st.metric("Média Geral", f"{media_valor:,.2f}")
 
 with col_kpi3:
     st.metric("Registros Processados", f"{total_linhas}")
@@ -139,7 +141,7 @@ with col_kpi3:
 st.markdown("---")
 
 # ============================================================
-# ÁREA DE GRÁFICOS
+# ÁREA DE GRÁFICOS E SELEÇÃO DE MÉTRICAS
 # ============================================================
 
 col_grafico, col_config = st.columns([3, 1])
@@ -155,16 +157,18 @@ with col_config:
         index_padrao = list(df.columns).index(datas[0])
 
     eixo_x_view = st.selectbox("Agrupar Dados Por:", list(df.columns), index=index_padrao)
+    
+    # IMPORTANTE: Esta variável 'eixo_y_view' define qual número será analisado (Vendas, Qtd, etc)
     eixo_y_view = st.selectbox("Métrica Analisada:", numericas, index=0)
 
+    # Salva no banco de dados
     chave_salvo = f"save_{arquivo.name}_{len(df)}"
     if chave_salvo not in st.session_state:
         salvar_registro(usuario_atual, arquivo.name, df, eixo_y_view)
         st.session_state[chave_salvo] = True
 
 with col_grafico:
-    # Renderiza layout e deve popular st.session_state['figs_pdf'] internamente se configurado
-    # Se render_layout não popula 'figs_pdf', os gráficos não irão para o PDF.
+    # Renderiza os gráficos e popula st.session_state['figs_pdf']
     df_agrupado = render_layout(df, datas, numericas, categoricas, lang="pt")
 
 # ============================================================
@@ -179,6 +183,7 @@ col_ia_txt, col_ia_btn = st.columns([4, 1])
 with col_ia_btn:
     if st.button("✨ Analisar com IA Premium", type="primary"):
         with st.spinner("Lendo padrões, detectando anomalias e gerando relatório avançado..."):
+            # A IA também precisa saber qual coluna analisar (eixo_y_view)
             analise = analisar_com_ia(df, eixo_x_view, eixo_y_view)
             st.session_state["analise_ia"] = analise
 
@@ -186,7 +191,7 @@ if "analise_ia" in st.session_state:
     st.info(st.session_state["analise_ia"])
 
 # ============================================================
-# EXPORTAÇÃO DO RELATÓRIO
+# EXPORTAÇÃO DO RELATÓRIO PDF
 # ============================================================
 
 st.markdown("---")
@@ -225,7 +230,7 @@ with st.container():
 
             with st.spinner("📑 Montando relatório profissional..."):
                 try:
-                    # Gera o PDF e salva no Session State
+                    # Gera o PDF passando a 'coluna_alvo' correta
                     pdf_data = gerar_pdf_pro(
                         df_original=df,
                         df_limpo=df,
@@ -234,20 +239,10 @@ with st.container():
                         categoricas=categoricas,
                         figs_principais=figs,
                         texto_ia=texto_ia,
-                        usuario=usuario_atual  # Passando o usuário correto
+                        usuario=usuario_atual,
+                        coluna_alvo=eixo_y_view  # <-- CORREÇÃO: Garante que o KPI seja da coluna selecionada
                     )
-                    # Garante que seja bytes para o Streamlit aceitar
+                    
+                    # Converte para bytes e salva no estado
                     st.session_state["pdf_bytes"] = bytes(pdf_data)
-                    st.success("Relatório gerado! O botão de download apareceu abaixo.")
-                except Exception as e:
-                    st.error(f"Erro ao gerar PDF: {e}")
-
-        # Botão para BAIXAR o PDF (fora do if do botão Gerar)
-        if st.session_state["pdf_bytes"] is not None:
-            st.download_button(
-                label="⬇️ Baixar Relatório PDF",
-                data=st.session_state["pdf_bytes"],
-                file_name="Relatorio_Platero_Pro.pdf",
-                mime="application/pdf",
-                type="primary"
-            )
+                    st.success("Relatório gerado! O botão de download apareceu abaixo

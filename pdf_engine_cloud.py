@@ -1,4 +1,6 @@
 import tempfile
+import os
+import requests
 from datetime import datetime
 
 import pandas as pd
@@ -11,14 +13,16 @@ COR_AZUL = (0, 51, 102)
 COR_CINZA = (85, 85, 85)
 COR_TEXTO = (40, 40, 40)
 
-
 class PDF(FPDF):
     def header(self):
-        self.set_font("Helvetica", 'B', 14)
+        # Tenta usar DejaVu se disponível, senão Helvetica
+        font = "DejaVu" if "DejaVu" in self.fonts else "Helvetica"
+        
+        self.set_font(font, 'B', 14)
         self.set_text_color(*COR_AZUL)
         self.cell(0, 8, "Relatório Executivo - Platero Analytics", ln=True, align="L")
 
-        self.set_font("Helvetica", '', 9)
+        self.set_font(font, '', 9)
         self.set_text_color(*COR_CINZA)
         data_str = datetime.now().strftime('%d/%m/%Y %H:%M')
         self.cell(0, 6, f"Gerado em {data_str}", ln=True, align="L")
@@ -26,21 +30,16 @@ class PDF(FPDF):
 
     def footer(self):
         self.set_y(-15)
-        self.set_font("Helvetica", '', 8)
+        font = "DejaVu" if "DejaVu" in self.fonts else "Helvetica"
+        self.set_font(font, '', 8)
         self.set_text_color(*COR_CINZA)
         self.cell(0, 10, f"Página {self.page_no()}/{{nb}}", 0, 0, 'C')
 
     def titulo(self, texto):
-        self.set_font("Helvetica", 'B', 12)
+        font = "DejaVu" if "DejaVu" in self.fonts else "Helvetica"
+        self.set_font(font, 'B', 12)
         self.set_text_color(*COR_AZUL)
         self.ln(4)
-        
-        # --- CORREÇÃO: Limpeza de caracteres incompatíveis ---
-        # Garante que emojis ou aspas especiais não quebrem o PDF
-        if texto:
-            texto = texto.encode('latin-1', 'replace').decode('latin-1')
-        # -----------------------------------------------------
-
         self.cell(0, 8, texto, ln=True)
         self.set_draw_color(200, 200, 200)
         y = self.get_y()
@@ -48,15 +47,10 @@ class PDF(FPDF):
         self.ln(3)
 
     def paragrafo(self, texto):
-        self.set_font("Helvetica", '', 10)
+        font = "DejaVu" if "DejaVu" in self.fonts else "Helvetica"
+        self.set_font(font, '', 10)
         self.set_text_color(*COR_TEXTO)
-
-        # --- CORREÇÃO: Limpeza de caracteres incompatíveis ---
-        # Converte caracteres que o FPDF não aceita (ex: emojis) em '?'
-        if texto:
-            texto = texto.encode('latin-1', 'replace').decode('latin-1')
-        # -----------------------------------------------------
-
+        # Removemos o .encode('latin-1') pois agora vamos usar fonte Unicode
         self.multi_cell(0, 5, texto)
         self.ln(2)
 
@@ -67,13 +61,24 @@ class PDF(FPDF):
             fig.savefig(tmp.name, dpi=120, bbox_inches="tight")
             self.image(tmp.name, x=15, w=largura)
 
-
 def fmt_num(x):
     try:
         return f"{float(x):,.2f}"
     except:
         return str(x)
 
+def check_download_font():
+    """Descarrega a fonte DejaVuSans se não existir para suportar emojis."""
+    font_path = "DejaVuSans.ttf"
+    if not os.path.exists(font_path):
+        url = "https://github.com/reingart/pyfpdf/raw/master/fpdf/font/DejaVuSans.ttf"
+        try:
+            r = requests.get(url, allow_redirects=True)
+            with open(font_path, 'wb') as f:
+                f.write(r.content)
+        except:
+            pass
+    return font_path
 
 def gerar_pdf_pro(
     df_original,
@@ -83,35 +88,49 @@ def gerar_pdf_pro(
     categoricas,
     figs_principais,
     texto_ia,
-    usuario="Cliente"
+    usuario="Cliente",
+    coluna_alvo=None  # NOVO: Recebe a coluna correta para análise
 ):
     pdf = PDF(orientation="P", unit="mm", format="A4")
+    
+    # 1. Configurar Fonte Unicode
+    font_path = check_download_font()
+    if os.path.exists(font_path):
+        pdf.add_font("DejaVu", "", font_path, uni=True)
+        pdf.add_font("DejaVu", "B", font_path, uni=True) # Usando a mesma para bold por simplicidade
+        main_font = "DejaVu"
+    else:
+        main_font = "Helvetica" # Fallback
+
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.alias_nb_pages()
 
     # CAPA
     pdf.add_page()
-    pdf.set_font("Helvetica", 'B', 20)
+    pdf.set_font(main_font, 'B', 20)
     pdf.set_text_color(*COR_AZUL)
     pdf.ln(40)
     pdf.cell(0, 10, "Relatório Executivo", ln=True, align="C")
 
-    pdf.set_font("Helvetica", '', 12)
+    pdf.set_font(main_font, '', 12)
     pdf.set_text_color(*COR_CINZA)
     pdf.ln(5)
-    
-    # Limpeza também no nome do cliente por segurança
-    if usuario:
-        usuario = usuario.encode('latin-1', 'replace').decode('latin-1')
-        
     pdf.cell(0, 8, f"Cliente: {usuario}", ln=True, align="C")
 
     # RESUMO / KPIs
     pdf.add_page()
     pdf.titulo("Resumo numérico")
 
-    if numericas:
+    # LÓGICA CORRIGIDA: Usa a coluna alvo se fornecida, senão tenta a primeira numérica
+    col_valor = None
+    if coluna_alvo and coluna_alvo in df_limpo.columns:
+         if pd.api.types.is_numeric_dtype(df_limpo[coluna_alvo]):
+             col_valor = coluna_alvo
+    
+    if not col_valor and numericas:
         col_valor = numericas[0]
+
+    if col_valor:
         serie = pd.to_numeric(df_limpo[col_valor], errors="coerce")
         total = serie.sum(skipna=True)
         media = serie.mean(skipna=True)
@@ -130,7 +149,7 @@ def gerar_pdf_pro(
         )
         pdf.paragrafo(texto)
     else:
-        pdf.paragrafo("Nenhuma coluna numérica foi identificada para cálculo de KPIs.")
+        pdf.paragrafo("Nenhuma coluna numérica válida identificada para KPIs.")
 
     # GRÁFICOS PRINCIPAIS
     if figs_principais:
@@ -146,8 +165,7 @@ def gerar_pdf_pro(
     if texto_ia:
         pdf.paragrafo(texto_ia)
     else:
-        pdf.paragrafo("Nenhum parecer de IA foi fornecido para esta análise.")
+        pdf.paragrafo("Nenhum parecer de IA foi fornecido.")
 
-    # EXPORTAÇÃO DO PDF
-    pdf_bytes = pdf.output()  
-    return pdf_bytes
+    # Retorna bytes para o Streamlit
+    return bytes(pdf.output())
