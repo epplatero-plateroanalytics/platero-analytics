@@ -240,9 +240,22 @@ with st.container():
                         figs_principais=figs,
                         texto_ia=texto_ia,
                         usuario=usuario_atual,
-                        coluna_alvo=eixo_y_view  # <-- CORREÇÃO: Garante que o KPI seja da coluna selecionada
+                        coluna_alvo=eixo_y_view
                     )
                     
                     # Converte para bytes e salva no estado
                     st.session_state["pdf_bytes"] = bytes(pdf_data)
-                    st.success("Relatório gerado! O botão de download apareceu abaixo
+                    st.success("Relatório gerado! O botão de download apareceu abaixo.")
+                
+                except Exception as e:
+                    st.error(f"Erro ao gerar PDF: {e}")
+
+        # Botão para BAIXAR o PDF
+        if st.session_state["pdf_bytes"] is not None:
+            st.download_button(
+                label="⬇️ Baixar Relatório PDF",
+                data=st.session_state["pdf_bytes"],
+                file_name="Relatorio_Platero_Pro.pdf",
+                mime="application/pdf",
+                type="primary"
+            )
