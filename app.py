@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 
+# Importações dos seus módulos (mantive igual)
 from cleaner import carregar_e_limpar_inteligente
 from utils import detectar_tipos
 from layout import render_layout
@@ -33,6 +34,7 @@ def check_password():
     def password_entered():
         if "passwords" in st.secrets and st.session_state["password"] in st.secrets["passwords"].values():
             st.session_state["password_correct"] = True
+            # Encontra a chave (usuário) baseada no valor (senha)
             st.session_state["username"] = [
                 k for k, v in st.secrets["passwords"].items() if v == st.session_state["password"]
             ][0]
@@ -161,6 +163,8 @@ with col_config:
         st.session_state[chave_salvo] = True
 
 with col_grafico:
+    # Renderiza layout e deve popular st.session_state['figs_pdf'] internamente se configurado
+    # Se render_layout não popula 'figs_pdf', os gráficos não irão para o PDF.
     df_agrupado = render_layout(df, datas, numericas, categoricas, lang="pt")
 
 # ============================================================
@@ -209,28 +213,41 @@ with st.container():
 
     col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
 
+    # Inicializa estado do PDF se não existir
+    if "pdf_bytes" not in st.session_state:
+        st.session_state["pdf_bytes"] = None
+
     with col_btn2:
+        # Botão para GERAR o PDF
         if st.button("📄 Gerar Relatório PDF", type="primary"):
             figs = st.session_state.get("figs_pdf", [])
             texto_ia = st.session_state.get("analise_ia", "")
 
             with st.spinner("📑 Montando relatório profissional..."):
-                pdf_bytes = gerar_pdf_pro(
-                    df,
-                    df,
-                    datas,
-                    numericas,
-                    categoricas,
-                    figs,
-                    texto_ia
-                )
+                try:
+                    # Gera o PDF e salva no Session State
+                    pdf_data = gerar_pdf_pro(
+                        df_original=df,
+                        df_limpo=df,
+                        datas=datas,
+                        numericas=numericas,
+                        categoricas=categoricas,
+                        figs_principais=figs,
+                        texto_ia=texto_ia,
+                        usuario=usuario_atual  # Passando o usuário correto
+                    )
+                    # Garante que seja bytes para o Streamlit aceitar
+                    st.session_state["pdf_bytes"] = bytes(pdf_data)
+                    st.success("Relatório gerado! O botão de download apareceu abaixo.")
+                except Exception as e:
+                    st.error(f"Erro ao gerar PDF: {e}")
 
-            st.success("Relatório gerado com sucesso!")
-
+        # Botão para BAIXAR o PDF (fora do if do botão Gerar)
+        if st.session_state["pdf_bytes"] is not None:
             st.download_button(
-                "⬇️ Baixar Relatório PDF",
-                pdf_bytes,
-                "Relatorio_Platero_Pro.pdf",
-                "application/pdf",
+                label="⬇️ Baixar Relatório PDF",
+                data=st.session_state["pdf_bytes"],
+                file_name="Relatorio_Platero_Pro.pdf",
+                mime="application/pdf",
                 type="primary"
             )
