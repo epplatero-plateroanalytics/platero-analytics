@@ -3,7 +3,7 @@ import pandas as pd
 import io
 import re
 
-# Importações locais
+# Importações locais (Mantenha seus arquivos auxiliares na mesma pasta)
 from cleaner import carregar_e_limpar_inteligente
 from utils import detectar_tipos
 from layout import render_layout
@@ -15,6 +15,9 @@ from database import init_db, salvar_registro, carregar_historico
 # FUNÇÃO: LIMPEZA FORÇADA DE NÚMEROS
 # ============================================================
 def limpar_coluna_numerica(serie):
+    """
+    Converte qualquer bagunça (R$, texto, erro de ponto/vírgula) em número real.
+    """
     if pd.api.types.is_numeric_dtype(serie):
         return serie
 
@@ -25,12 +28,18 @@ def limpar_coluna_numerica(serie):
         if not val or val.lower() in ['nan', 'none', '', 'null']:
             return None
         
+        # Deixa apenas números, ponto, vírgula e sinal negativo
         val_clean = re.sub(r'[^\d.,-]', '', val)
+        
         try:
+            # Lógica Híbrida (Brasil vs EUA)
             if ',' in val_clean and '.' in val_clean:
+                # 1.234,56 -> Tira ponto, troca vírgula por ponto
                 val_clean = val_clean.replace('.', '').replace(',', '.')
             elif ',' in val_clean:
+                # 1234,56 -> Troca vírgula por ponto
                 val_clean = val_clean.replace(',', '.')
+            
             return float(val_clean)
         except:
             return None
@@ -40,7 +49,7 @@ def limpar_coluna_numerica(serie):
 # ============================================================
 # FUNÇÃO: GERAR MODELO PADRÃO
 # ============================================================
-@st.cache_data # Cache para evitar recriar isso toda hora e travar a tela
+@st.cache_data
 def gerar_modelo_csv():
     df_modelo = pd.DataFrame({
         "DATA": ["01/01/2024", "02/01/2024", "03/01/2024"],
@@ -49,7 +58,7 @@ def gerar_modelo_csv():
         "VENDAS": [1500.00, 2500.50, 800.00],
         "QUANTIDADE": [1, 5, 2]
     })
-    return df_modelo.to_csv(index=False, sep=";").encode('utf-8')
+    return df_modelo.to_csv(index=False, sep=";").encode('latin-1') # Encoding Excel-Friendly
 
 # ============================================================
 # CONFIGURAÇÃO INICIAL
@@ -119,23 +128,21 @@ st.markdown("---")
 with st.sidebar:
     st.header("📂 Central de Arquivos")
     
-    # ADICIONEI KEY AQUI PARA EVITAR O ERRO 'removeChild'
     st.download_button(
         label="⬇️ Baixar Planilha Modelo",
         data=gerar_modelo_csv(),
         file_name="modelo_padrao_platero.csv",
         mime="text/csv",
-        key="btn_download_modelo" 
+        key="btn_download_modelo"
     )
     
     st.markdown("---")
     
-    # ADICIONEI KEY AQUI TAMBÉM
     arquivo = st.file_uploader("Carregar Base de Dados", type=["xlsx", "csv"], key="uploader_principal")
     
     usar_modo_seguro = st.checkbox("🛠️ Modo Seguro (Limpeza Forçada)", 
                                   value=True,
-                                  help="Ative se os números aparecerem gigantes ou errados.",
+                                  help="Ative para corrigir erros de leitura e números.",
                                   key="chk_modo_seguro")
 
     st.markdown("---")
@@ -146,11 +153,11 @@ with st.sidebar:
             st.info("Histórico indisponível.")
 
 if not arquivo:
-    st.info("👋 Bem-vindo! Para evitar erros, recomendamos usar a **Planilha Modelo** disponível na barra lateral.")
+    st.info("👋 Bem-vindo! Se tiver problemas, use a **Planilha Modelo**.")
     st.stop()
 
 # ============================================================
-# LÓGICA DE CARREGAMENTO
+# LÓGICA DE CARREGAMENTO BLINDADA (Corrige erro utf-8/0xe7)
 # ============================================================
 
 df = pd.DataFrame()
@@ -159,29 +166,40 @@ erro = None
 with st.spinner("🔄 Processando arquivo..."):
     if usar_modo_seguro:
         try:
+            # --- BLOCAGEM DE CODIFICAÇÃO (CORREÇÃO DO ERRO) ---
             if arquivo.name.endswith('.csv'):
                 try:
+                    # Tentativa 1: Padrão UTF-8 (Mundial)
                     df = pd.read_csv(arquivo, sep=None, engine='python', dtype=str)
-                except:
+                except UnicodeDecodeError:
+                    # Tentativa 2: Latin-1 (Excel Brasil - corrige o erro do 'ç')
                     arquivo.seek(0)
-                    df = pd.read_csv(arquivo, sep=',', dtype=str)
+                    df = pd.read_csv(arquivo, sep=None, engine='python', dtype=str, encoding='latin-1')
+                except Exception:
+                    # Tentativa 3: Força separador ; e Latin-1
+                    arquivo.seek(0)
+                    df = pd.read_csv(arquivo, sep=';', dtype=str, encoding='latin-1')
             else:
+                # Excel (xlsx) não costuma ter problema de encoding
                 df = pd.read_excel(arquivo, dtype=str)
             
+            # --- CONVERSÃO INTELIGENTE DE NÚMEROS ---
             for col in df.columns:
                 amostra = df[col].dropna().head(10).astype(str).str.cat()
+                # Se tem números na amostra, tenta limpar
                 if any(char.isdigit() for char in amostra):
                     col_convertida = limpar_coluna_numerica(df[col])
+                    # Se converteu bem, salva
                     if col_convertida.notna().sum() > (len(df) * 0.5):
                         df[col] = col_convertida
 
         except Exception as e:
-            erro = f"Erro no modo seguro: {e}"
+            erro = f"Erro grave no modo seguro: {e}"
     else:
         df, erro = carregar_e_limpar_inteligente(arquivo)
 
 if erro:
-    st.error(f"Erro ao processar: {erro}. Tente usar o Modelo Padrão.")
+    st.error(f"Não foi possível ler o arquivo: {erro}")
     st.stop()
 
 if df.empty:
@@ -243,10 +261,10 @@ with col_config:
     elif "ANO" in df.columns: index_padrao = list(df.columns).index("ANO")
     elif "CATEGORIA" in df.columns: index_padrao = list(df.columns).index("CATEGORIA")
 
-    eixo_x_view = st.selectbox("Eixo X (Agrupamento):", list(df.columns), index=index_padrao, key="sel_eixo_x")
+    eixo_x_view = st.selectbox("Eixo X (Agrupamento):", list(df.columns), index=index_padrao, key="sel_x")
     
     idx_y = list(numericas).index(col_kpi_padrao) if col_kpi_padrao in numericas else 0
-    eixo_y_view = st.selectbox("Eixo Y (Valor):", numericas, index=idx_y, key="sel_eixo_y")
+    eixo_y_view = st.selectbox("Eixo Y (Valor):", numericas, index=idx_y, key="sel_y")
 
     chave_salvo = f"save_{arquivo.name}_{len(df)}"
     if chave_salvo not in st.session_state:
@@ -267,7 +285,7 @@ st.subheader("🤖 Consultor Virtual")
 col_ia_txt, col_ia_btn = st.columns([4, 1])
 
 with col_ia_btn:
-    if st.button("✨ Analisar com IA", type="primary", key="btn_analisar_ia"):
+    if st.button("✨ Analisar com IA", type="primary", key="btn_ia"):
         with st.spinner("Analisando padrões..."):
             analise = analisar_com_ia(df, eixo_x_view, eixo_y_view)
             st.session_state["analise_ia"] = analise
@@ -288,7 +306,7 @@ if "pdf_bytes" not in st.session_state:
     st.session_state["pdf_bytes"] = None
 
 with col_btn2:
-    if st.button("📄 Gerar Relatório PDF", type="primary", key="btn_gerar_pdf"):
+    if st.button("📄 Gerar Relatório PDF", type="primary", key="btn_pdf"):
         figs = st.session_state.get("figs_pdf", [])
         texto_ia = st.session_state.get("analise_ia", "")
 
@@ -317,5 +335,5 @@ with col_btn2:
             "Relatorio_Platero_Pro.pdf",
             "application/pdf",
             type="primary",
-            key="btn_baixar_final"
+            key="dl_pdf"
         )
