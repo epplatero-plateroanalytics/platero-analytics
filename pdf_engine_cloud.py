@@ -3,6 +3,7 @@ import os
 import requests
 import re
 from datetime import datetime
+import unicodedata  # <--- NOVA IMPORTAÇÃO IMPORTANTE
 
 import pandas as pd
 import matplotlib
@@ -16,50 +17,42 @@ COR_TEXTO = (40, 40, 40)
 
 def sanitize_text(text):
     """
-    Limpa o texto mantendo a formatação de linhas e listas.
+    Limpeza profunda: Remove Markdown, Emojis e converte para Latin-1 seguro.
     """
     if not text:
         return ""
     
-    # 1. Remove formatação Markdown/LaTeX da IA
-    text = text.replace("**", "").replace("__", "")
-    text = text.replace("$$", "").replace("$", "")
-    text = text.replace("\[", "").replace("\]", "")
+    # 1. Remove formatação Markdown da IA (**, ##, $$, etc)
+    text = re.sub(r'\*\*|__|##|`', '', text)  # Remove negrito/itálico/code
+    text = re.sub(r'\$\$|\$', '', text)       # Remove LaTeX cifrão
     
-    # 2. Substituições de caracteres especiais por equivalentes simples
+    # 2. Substituições visuais para caracteres comuns
     replacements = {
-        "•": "-",       # Bullet point vira traço
-        "–": "-",       # Travessão vira hífen
-        "—": "-", 
-        "“": '"', "”": '"', 
-        "‘": "'", "’": "'",
-        "…": "...",
-        "📊": "", "📈": "", "📉": "", "🤖": "", "✨": "", # Remove emojis
-        "🔒": "", "📂": "", "👋": "", "🔄": "", "⚠️": ""
+        "•": "-", "–": "-", "—": "-", 
+        "“": '"', "”": '"', "‘": "'", "’": "'",
+        "…": "..."
     }
-    
     for char, replacement in replacements.items():
         text = text.replace(char, replacement)
 
-    # 3. CORREÇÃO DO LAYOUT (CRUCIAL):
-    # Não usamos mais o regex que remove todos os espaços (\s+).
-    # Em vez disso, processamos linha por linha para manter os "Enters" (\n).
-    
-    lines = text.split('\n')
-    cleaned_lines = []
-    
-    for line in lines:
-        # Remove espaços excessivos apenas DENTRO da linha, não entre linhas
-        line_clean = re.sub(r'[ \t]+', ' ', line).strip()
-        if line_clean:
-            cleaned_lines.append(line_clean)
+    # 3. REMOÇÃO DE EMOJIS E SÍMBOLOS (A "Limpeza Nuclear")
+    # Em vez de listar um por um, removemos tudo que não é texto padrão.
+    # Mantém letras, números, pontuação básica e quebras de linha.
+    text_safe = ""
+    for char in text:
+        # Se for caractere ASCII ou Latin-1 válido (acentos), mantém.
+        if ord(char) < 256:
+            text_safe += char
+        else:
+            # Se for símbolo complexo (emoji), troca por espaço
+            text_safe += " "
             
-    # Remonta o texto com quebras de linha limpas
+    # 4. Normaliza espaços (mantendo as quebras de linha importantes)
+    lines = text_safe.split('\n')
+    cleaned_lines = [re.sub(r'\s+', ' ', line).strip() for line in lines]
     text = "\n".join(cleaned_lines)
         
-    # 4. Garante compatibilidade final (Latin-1) se a fonte Unicode falhar
-    # Isso evita erros, transformando caracteres impossíveis em '?'
-    # Mas como já limpamos a maioria, os '?' devem sumir.
+    # 5. Codificação Final (Garante que nada explode)
     return text.encode('latin-1', 'replace').decode('latin-1')
 
 
@@ -92,10 +85,7 @@ class PDF(FPDF):
         self.set_font(font, 'B', 12)
         self.set_text_color(*COR_AZUL)
         self.ln(4)
-        
-        # Sempre sanitiza títulos para evitar quebras
         texto = sanitize_text(texto)
-            
         self.cell(0, 8, texto, ln=True)
         self.set_draw_color(200, 200, 200)
         y = self.get_y()
@@ -106,10 +96,7 @@ class PDF(FPDF):
         font = "DejaVu" if self.use_unicode else "Helvetica"
         self.set_font(font, '', 10)
         self.set_text_color(*COR_TEXTO)
-        
-        # Sempre sanitiza para garantir layout limpo
         texto = sanitize_text(texto)
-            
         self.multi_cell(0, 5, texto)
         self.ln(2)
 
@@ -127,6 +114,7 @@ def fmt_num(x):
         return str(x)
 
 def check_download_font():
+    # Tenta baixar a fonte, mas se falhar, o sanitize_text garante que o PDF não quebra
     font_path = "DejaVuSans.ttf"
     if not os.path.exists(font_path):
         url = "https://github.com/reingart/pyfpdf/raw/master/fpdf/font/DejaVuSans.ttf"
@@ -184,7 +172,7 @@ def gerar_pdf_pro(
     pdf.add_page()
     pdf.titulo("Resumo numérico")
 
-    # --- LÓGICA DE COLUNA ALVO ---
+    # LÓGICA DE COLUNA (Crucial para não somar ANOS ou CÓDIGOS)
     col_valor = None
     if coluna_alvo and coluna_alvo in df_limpo.columns:
          if pd.api.types.is_numeric_dtype(df_limpo[coluna_alvo]):
