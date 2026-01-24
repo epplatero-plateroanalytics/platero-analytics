@@ -3,7 +3,7 @@ import pandas as pd
 import io
 import re
 
-# Importações locais (Mantenha seus arquivos auxiliares na mesma pasta)
+# Importações locais
 from cleaner import carregar_e_limpar_inteligente
 from utils import detectar_tipos
 from layout import render_layout
@@ -12,36 +12,25 @@ from ai_analyst import analisar_com_ia
 from database import init_db, salvar_registro, carregar_historico
 
 # ============================================================
-# FUNÇÃO: LIMPEZA FORÇADA DE NÚMEROS (A "Bala de Prata")
+# FUNÇÃO: LIMPEZA FORÇADA DE NÚMEROS
 # ============================================================
 def limpar_coluna_numerica(serie):
-    """
-    Converte qualquer bagunça (R$, texto, erro de ponto/vírgula) em número real.
-    Impede a criação de números gigantes por concatenação de texto.
-    """
     if pd.api.types.is_numeric_dtype(serie):
         return serie
 
     serie_clean = serie.astype(str).str.strip()
-    # Remove R$, cifrões e espaços
     serie_clean = serie_clean.str.replace(r'[R$\s]', '', regex=True)
 
     def converter_valor(val):
         if not val or val.lower() in ['nan', 'none', '', 'null']:
             return None
         
-        # Deixa apenas números, ponto, vírgula e sinal negativo
         val_clean = re.sub(r'[^\d.,-]', '', val)
-        
         try:
-            # Lógica Híbrida (Brasil vs EUA)
             if ',' in val_clean and '.' in val_clean:
-                # 1.234,56 -> Tira ponto, troca vírgula por ponto
                 val_clean = val_clean.replace('.', '').replace(',', '.')
             elif ',' in val_clean:
-                # 1234,56 -> Troca vírgula por ponto
                 val_clean = val_clean.replace(',', '.')
-            
             return float(val_clean)
         except:
             return None
@@ -49,8 +38,9 @@ def limpar_coluna_numerica(serie):
     return serie_clean.apply(converter_valor)
 
 # ============================================================
-# FUNÇÃO: GERAR MODELO PADRÃO (Para o Cliente)
+# FUNÇÃO: GERAR MODELO PADRÃO
 # ============================================================
+@st.cache_data # Cache para evitar recriar isso toda hora e travar a tela
 def gerar_modelo_csv():
     df_modelo = pd.DataFrame({
         "DATA": ["01/01/2024", "02/01/2024", "03/01/2024"],
@@ -123,33 +113,33 @@ with col_titulo:
 st.markdown("---")
 
 # ============================================================
-# SIDEBAR (COM DOWNLOAD DE MODELO)
+# SIDEBAR
 # ============================================================
 
 with st.sidebar:
     st.header("📂 Central de Arquivos")
     
-    # 1. Botão para baixar o modelo (Padronização)
+    # ADICIONEI KEY AQUI PARA EVITAR O ERRO 'removeChild'
     st.download_button(
         label="⬇️ Baixar Planilha Modelo",
         data=gerar_modelo_csv(),
         file_name="modelo_padrao_platero.csv",
         mime="text/csv",
-        help="Use este modelo para garantir que seus dados sejam lidos corretamente."
+        key="btn_download_modelo" 
     )
     
     st.markdown("---")
     
-    # 2. Upload
-    arquivo = st.file_uploader("Carregar Base de Dados", type=["xlsx", "csv"])
+    # ADICIONEI KEY AQUI TAMBÉM
+    arquivo = st.file_uploader("Carregar Base de Dados", type=["xlsx", "csv"], key="uploader_principal")
     
-    # 3. Modo Seguro (Sempre visível para emergências)
     usar_modo_seguro = st.checkbox("🛠️ Modo Seguro (Limpeza Forçada)", 
                                   value=True,
-                                  help="Ative se os números aparecerem gigantes ou errados.")
+                                  help="Ative se os números aparecerem gigantes ou errados.",
+                                  key="chk_modo_seguro")
 
     st.markdown("---")
-    if st.checkbox("Ver Histórico"):
+    if st.checkbox("Ver Histórico", key="chk_historico"):
         try:
             st.dataframe(carregar_historico(usuario_atual))
         except:
@@ -160,7 +150,7 @@ if not arquivo:
     st.stop()
 
 # ============================================================
-# LÓGICA DE CARREGAMENTO ROBUSTA
+# LÓGICA DE CARREGAMENTO
 # ============================================================
 
 df = pd.DataFrame()
@@ -169,7 +159,6 @@ erro = None
 with st.spinner("🔄 Processando arquivo..."):
     if usar_modo_seguro:
         try:
-            # LER TUDO COMO TEXTO (Crucial para não corromper números)
             if arquivo.name.endswith('.csv'):
                 try:
                     df = pd.read_csv(arquivo, sep=None, engine='python', dtype=str)
@@ -179,13 +168,10 @@ with st.spinner("🔄 Processando arquivo..."):
             else:
                 df = pd.read_excel(arquivo, dtype=str)
             
-            # TENTAR CONVERTER COLUNAS NUMÉRICAS
             for col in df.columns:
-                # Verifica se a coluna tem cara de número (contém dígitos)
                 amostra = df[col].dropna().head(10).astype(str).str.cat()
                 if any(char.isdigit() for char in amostra):
                     col_convertida = limpar_coluna_numerica(df[col])
-                    # Se converteu com sucesso a maioria, aplica
                     if col_convertida.notna().sum() > (len(df) * 0.5):
                         df[col] = col_convertida
 
@@ -211,7 +197,7 @@ datas, numericas = tipos["datas"], tipos["numericas"]
 categoricas = tipos["categoricas"]
 
 if not numericas:
-    st.error("⚠️ Não encontramos colunas numéricas (Vendas, Valor, etc). Verifique se a planilha segue o modelo.")
+    st.error("⚠️ Não encontramos colunas numéricas (Vendas, Valor, etc).")
     st.stop()
 
 # ============================================================
@@ -222,7 +208,6 @@ st.subheader("📈 Visão Geral")
 
 col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
 
-# Tenta achar 'VENDAS' ou 'VALOR' automaticamente
 col_kpi_padrao = numericas[0]
 for col in numericas:
     if "VENDA" in col.upper() or "VALOR" in col.upper() or "TOTAL" in col.upper():
@@ -253,19 +238,16 @@ col_grafico, col_config = st.columns([3, 1])
 with col_config:
     st.markdown("### ⚙️ Ajuste Fino")
 
-    # Eixo X Inteligente
     index_padrao = 0
     if datas: index_padrao = list(df.columns).index(datas[0])
     elif "ANO" in df.columns: index_padrao = list(df.columns).index("ANO")
     elif "CATEGORIA" in df.columns: index_padrao = list(df.columns).index("CATEGORIA")
 
-    eixo_x_view = st.selectbox("Eixo X (Agrupamento):", list(df.columns), index=index_padrao)
+    eixo_x_view = st.selectbox("Eixo X (Agrupamento):", list(df.columns), index=index_padrao, key="sel_eixo_x")
     
-    # Eixo Y Inteligente (Já selecionado acima)
     idx_y = list(numericas).index(col_kpi_padrao) if col_kpi_padrao in numericas else 0
-    eixo_y_view = st.selectbox("Eixo Y (Valor):", numericas, index=idx_y)
+    eixo_y_view = st.selectbox("Eixo Y (Valor):", numericas, index=idx_y, key="sel_eixo_y")
 
-    # Salva no banco (Silencioso para não travar)
     chave_salvo = f"save_{arquivo.name}_{len(df)}"
     if chave_salvo not in st.session_state:
         try: salvar_registro(usuario_atual, arquivo.name, df, eixo_y_view)
@@ -285,7 +267,7 @@ st.subheader("🤖 Consultor Virtual")
 col_ia_txt, col_ia_btn = st.columns([4, 1])
 
 with col_ia_btn:
-    if st.button("✨ Analisar com IA", type="primary"):
+    if st.button("✨ Analisar com IA", type="primary", key="btn_analisar_ia"):
         with st.spinner("Analisando padrões..."):
             analise = analisar_com_ia(df, eixo_x_view, eixo_y_view)
             st.session_state["analise_ia"] = analise
@@ -306,7 +288,7 @@ if "pdf_bytes" not in st.session_state:
     st.session_state["pdf_bytes"] = None
 
 with col_btn2:
-    if st.button("📄 Gerar Relatório PDF", type="primary"):
+    if st.button("📄 Gerar Relatório PDF", type="primary", key="btn_gerar_pdf"):
         figs = st.session_state.get("figs_pdf", [])
         texto_ia = st.session_state.get("analise_ia", "")
 
@@ -334,5 +316,6 @@ with col_btn2:
             st.session_state["pdf_bytes"],
             "Relatorio_Platero_Pro.pdf",
             "application/pdf",
-            type="primary"
+            type="primary",
+            key="btn_baixar_final"
         )
