@@ -34,6 +34,13 @@ class PDF(FPDF):
         self.set_font("Helvetica", 'B', 12)
         self.set_text_color(*COR_AZUL)
         self.ln(4)
+        
+        # --- CORREÇÃO: Limpeza de caracteres incompatíveis ---
+        # Garante que emojis ou aspas especiais não quebrem o PDF
+        if texto:
+            texto = texto.encode('latin-1', 'replace').decode('latin-1')
+        # -----------------------------------------------------
+
         self.cell(0, 8, texto, ln=True)
         self.set_draw_color(200, 200, 200)
         y = self.get_y()
@@ -43,6 +50,13 @@ class PDF(FPDF):
     def paragrafo(self, texto):
         self.set_font("Helvetica", '', 10)
         self.set_text_color(*COR_TEXTO)
+
+        # --- CORREÇÃO: Limpeza de caracteres incompatíveis ---
+        # Converte caracteres que o FPDF não aceita (ex: emojis) em '?'
+        if texto:
+            texto = texto.encode('latin-1', 'replace').decode('latin-1')
+        # -----------------------------------------------------
+
         self.multi_cell(0, 5, texto)
         self.ln(2)
 
@@ -85,6 +99,11 @@ def gerar_pdf_pro(
     pdf.set_font("Helvetica", '', 12)
     pdf.set_text_color(*COR_CINZA)
     pdf.ln(5)
+    
+    # Limpeza também no nome do cliente por segurança
+    if usuario:
+        usuario = usuario.encode('latin-1', 'replace').decode('latin-1')
+        
     pdf.cell(0, 8, f"Cliente: {usuario}", ln=True, align="C")
 
     # RESUMO / KPIs
@@ -130,5 +149,5 @@ def gerar_pdf_pro(
         pdf.paragrafo("Nenhum parecer de IA foi fornecido para esta análise.")
 
     # EXPORTAÇÃO DO PDF
-    pdf_bytes = pdf.output()   # fpdf2 retorna bytes corretos
+    pdf_bytes = pdf.output()  
     return pdf_bytes
