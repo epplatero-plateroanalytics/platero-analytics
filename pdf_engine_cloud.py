@@ -13,10 +13,26 @@ COR_AZUL = (0, 51, 102)
 COR_CINZA = (85, 85, 85)
 COR_TEXTO = (40, 40, 40)
 
+def sanitize_text(text):
+    """Substitui caracteres que a fonte padrão não suporta."""
+    if not text:
+        return ""
+    
+    replacements = {
+        "•": "-", "“": '"', "”": '"', "‘": "'", "’": "'",
+        "–": "-", "—": "-", "…": "...",
+        "📊": "", "📈": "", "📉": "", "🤖": "", "✨": ""
+    }
+    
+    for char, replacement in replacements.items():
+        text = text.replace(char, replacement)
+        
+    return text.encode('latin-1', 'replace').decode('latin-1')
+
 class PDF(FPDF):
     def __init__(self, orientation="P", unit="mm", format="A4"):
         super().__init__(orientation=orientation, unit=unit, format=format)
-        self.use_unicode = False  # Flag para saber se estamos usando Unicode
+        self.use_unicode = False
 
     def header(self):
         font = "DejaVu" if self.use_unicode else "Helvetica"
@@ -43,7 +59,6 @@ class PDF(FPDF):
         self.set_text_color(*COR_AZUL)
         self.ln(4)
         
-        # Limpeza de segurança
         if not self.use_unicode:
             texto = sanitize_text(texto)
             
@@ -58,7 +73,6 @@ class PDF(FPDF):
         self.set_font(font, '', 10)
         self.set_text_color(*COR_TEXTO)
         
-        # Limpeza de segurança se não tivermos fonte Unicode
         if not self.use_unicode:
             texto = sanitize_text(texto)
             
@@ -72,37 +86,6 @@ class PDF(FPDF):
             fig.savefig(tmp.name, dpi=120, bbox_inches="tight")
             self.image(tmp.name, x=15, w=largura)
 
-def sanitize_text(text):
-    """
-    Remove caracteres que quebram a fonte Helvetica/Latin-1.
-    Substitui bullets e aspas curvas por equivalentes simples.
-    """
-    if not text:
-        return ""
-    
-    # Substituições manuais comuns
-    replacements = {
-        "•": "-",      # Bullet point vira traço
-        "“": '"',      # Aspas curvas
-        "”": '"',
-        "‘": "'",
-        "’": "'",
-        "–": "-",      # En-dash
-        "—": "-",      # Em-dash
-        "…": "...",
-        "📊": "",      # Remove emojis comuns
-        "📈": "",
-        "📉": "",
-        "🤖": "",
-        "✨": ""
-    }
-    
-    for char, replacement in replacements.items():
-        text = text.replace(char, replacement)
-        
-    # Garante que é Latin-1 compatível
-    return text.encode('latin-1', 'replace').decode('latin-1')
-
 def fmt_num(x):
     try:
         return f"{float(x):,.2f}"
@@ -110,7 +93,6 @@ def fmt_num(x):
         return str(x)
 
 def check_download_font():
-    """Tenta baixar a fonte. Retorna o caminho se existir."""
     font_path = "DejaVuSans.ttf"
     if not os.path.exists(font_path):
         url = "https://github.com/reingart/pyfpdf/raw/master/fpdf/font/DejaVuSans.ttf"
@@ -119,7 +101,7 @@ def check_download_font():
             with open(font_path, 'wb') as f:
                 f.write(r.content)
         except:
-            return None # Falha no download
+            return None
     return font_path if os.path.exists(font_path) else None
 
 def gerar_pdf_pro(
@@ -135,15 +117,14 @@ def gerar_pdf_pro(
 ):
     pdf = PDF(orientation="P", unit="mm", format="A4")
     
-    # 1. Tenta carregar fonte Unicode
     font_path = check_download_font()
     if font_path:
         try:
             pdf.add_font("DejaVu", "", font_path)
             pdf.add_font("DejaVu", "B", font_path)
             pdf.use_unicode = True
-        except Exception:
-            pdf.use_unicode = False # Fallback se o arquivo estiver corrompido
+        except:
+            pdf.use_unicode = False
     else:
         pdf.use_unicode = False
 
@@ -152,7 +133,6 @@ def gerar_pdf_pro(
 
     # CAPA
     pdf.add_page()
-    
     font_capa = "DejaVu" if pdf.use_unicode else "Helvetica"
     pdf.set_font(font_capa, 'B', 20)
     pdf.set_text_color(*COR_AZUL)
@@ -165,19 +145,20 @@ def gerar_pdf_pro(
     
     if not pdf.use_unicode:
         usuario = sanitize_text(usuario)
-        
     pdf.cell(0, 8, f"Cliente: {usuario}", ln=True, align="C")
 
     # RESUMO / KPIs
     pdf.add_page()
     pdf.titulo("Resumo numérico")
 
-    # LÓGICA DE COLUNA
+    # --- CORREÇÃO DE COLUNA ---
+    # Prioriza a coluna_alvo (escolhida no selectbox do app)
     col_valor = None
     if coluna_alvo and coluna_alvo in df_limpo.columns:
          if pd.api.types.is_numeric_dtype(df_limpo[coluna_alvo]):
              col_valor = coluna_alvo
     
+    # Se falhar, pega a primeira numérica
     if not col_valor and numericas:
         col_valor = numericas[0]
 
@@ -189,7 +170,6 @@ def gerar_pdf_pro(
         maximo = serie.max(skipna=True)
         desvio = serie.std(skipna=True)
 
-        # Usamos traço (-) em vez de bullet (•) no texto base para garantir compatibilidade
         texto = (
             f"Coluna analisada: {col_valor}\n\n"
             f"- Total: {fmt_num(total)}\n"
@@ -201,9 +181,9 @@ def gerar_pdf_pro(
         )
         pdf.paragrafo(texto)
     else:
-        pdf.paragrafo("Nenhuma coluna numérica válida identificada para KPIs.")
+        pdf.paragrafo("Nenhuma coluna numérica válida para KPIs.")
 
-    # GRÁFICOS PRINCIPAIS
+    # GRÁFICOS
     if figs_principais:
         pdf.titulo("Gráficos principais")
         for fig in figs_principais:
