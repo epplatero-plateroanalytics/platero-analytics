@@ -1,6 +1,7 @@
 import tempfile
 import os
 import requests
+import re  # <--- NOVA IMPORTAÇÃO ESSENCIAL
 from datetime import datetime
 
 import pandas as pd
@@ -14,10 +15,18 @@ COR_CINZA = (85, 85, 85)
 COR_TEXTO = (40, 40, 40)
 
 def sanitize_text(text):
-    """Substitui caracteres que a fonte padrão não suporta."""
+    """
+    Remove caracteres incompatíveis e sujeira de Markdown (**, $, etc).
+    """
     if not text:
         return ""
     
+    # 1. Remove formatação Markdown da IA (negrito, itálico, LaTeX)
+    # Remove **texto**, __texto__, $texto$, etc.
+    text = text.replace("**", "").replace("__", "")
+    text = text.replace("$", "").replace("%^", "%")
+    
+    # 2. Substituições de caracteres especiais (Emojis e aspas)
     replacements = {
         "•": "-", "“": '"', "”": '"', "‘": "'", "’": "'",
         "–": "-", "—": "-", "…": "...",
@@ -26,7 +35,11 @@ def sanitize_text(text):
     
     for char, replacement in replacements.items():
         text = text.replace(char, replacement)
+    
+    # 3. Limpeza final de espaços extras (ex: espaço duplo gerado pela remoção)
+    text = re.sub(r'\s+', ' ', text).strip()
         
+    # 4. Garante compatibilidade Latin-1 se não estiver usando fonte Unicode
     return text.encode('latin-1', 'replace').decode('latin-1')
 
 class PDF(FPDF):
@@ -59,8 +72,8 @@ class PDF(FPDF):
         self.set_text_color(*COR_AZUL)
         self.ln(4)
         
-        if not self.use_unicode:
-            texto = sanitize_text(texto)
+        # Aplica limpeza mesmo se usar Unicode para remover Markdown (**)
+        texto = sanitize_text(texto)
             
         self.cell(0, 8, texto, ln=True)
         self.set_draw_color(200, 200, 200)
@@ -73,8 +86,8 @@ class PDF(FPDF):
         self.set_font(font, '', 10)
         self.set_text_color(*COR_TEXTO)
         
-        if not self.use_unicode:
-            texto = sanitize_text(texto)
+        # Aplica limpeza mesmo se usar Unicode para remover Markdown (**)
+        texto = sanitize_text(texto)
             
         self.multi_cell(0, 5, texto)
         self.ln(2)
@@ -143,22 +156,20 @@ def gerar_pdf_pro(
     pdf.set_text_color(*COR_CINZA)
     pdf.ln(5)
     
-    if not pdf.use_unicode:
-        usuario = sanitize_text(usuario)
+    # Limpa nome do usuário para evitar erro se tiver emoji
+    usuario = sanitize_text(usuario)
     pdf.cell(0, 8, f"Cliente: {usuario}", ln=True, align="C")
 
     # RESUMO / KPIs
     pdf.add_page()
     pdf.titulo("Resumo numérico")
 
-    # --- CORREÇÃO DE COLUNA ---
-    # Prioriza a coluna_alvo (escolhida no selectbox do app)
+    # --- LÓGICA DE COLUNA ALVO ---
     col_valor = None
     if coluna_alvo and coluna_alvo in df_limpo.columns:
          if pd.api.types.is_numeric_dtype(df_limpo[coluna_alvo]):
              col_valor = coluna_alvo
     
-    # Se falhar, pega a primeira numérica
     if not col_valor and numericas:
         col_valor = numericas[0]
 
