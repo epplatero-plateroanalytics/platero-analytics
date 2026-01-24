@@ -14,10 +14,12 @@ COR_CINZA = (85, 85, 85)
 COR_TEXTO = (40, 40, 40)
 
 class PDF(FPDF):
+    def __init__(self, orientation="P", unit="mm", format="A4"):
+        super().__init__(orientation=orientation, unit=unit, format=format)
+        self.use_unicode = False  # Flag para saber se estamos usando Unicode
+
     def header(self):
-        # Tenta usar DejaVu se disponível, senão Helvetica
-        font = "DejaVu" if "DejaVu" in self.fonts else "Helvetica"
-        
+        font = "DejaVu" if self.use_unicode else "Helvetica"
         self.set_font(font, 'B', 14)
         self.set_text_color(*COR_AZUL)
         self.cell(0, 8, "Relatório Executivo - Platero Analytics", ln=True, align="L")
@@ -30,16 +32,21 @@ class PDF(FPDF):
 
     def footer(self):
         self.set_y(-15)
-        font = "DejaVu" if "DejaVu" in self.fonts else "Helvetica"
+        font = "DejaVu" if self.use_unicode else "Helvetica"
         self.set_font(font, '', 8)
         self.set_text_color(*COR_CINZA)
         self.cell(0, 10, f"Página {self.page_no()}/{{nb}}", 0, 0, 'C')
 
     def titulo(self, texto):
-        font = "DejaVu" if "DejaVu" in self.fonts else "Helvetica"
+        font = "DejaVu" if self.use_unicode else "Helvetica"
         self.set_font(font, 'B', 12)
         self.set_text_color(*COR_AZUL)
         self.ln(4)
+        
+        # Limpeza de segurança
+        if not self.use_unicode:
+            texto = sanitize_text(texto)
+            
         self.cell(0, 8, texto, ln=True)
         self.set_draw_color(200, 200, 200)
         y = self.get_y()
@@ -47,10 +54,14 @@ class PDF(FPDF):
         self.ln(3)
 
     def paragrafo(self, texto):
-        font = "DejaVu" if "DejaVu" in self.fonts else "Helvetica"
+        font = "DejaVu" if self.use_unicode else "Helvetica"
         self.set_font(font, '', 10)
         self.set_text_color(*COR_TEXTO)
-        # Removemos o .encode('latin-1') pois agora vamos usar fonte Unicode
+        
+        # Limpeza de segurança se não tivermos fonte Unicode
+        if not self.use_unicode:
+            texto = sanitize_text(texto)
+            
         self.multi_cell(0, 5, texto)
         self.ln(2)
 
@@ -61,6 +72,37 @@ class PDF(FPDF):
             fig.savefig(tmp.name, dpi=120, bbox_inches="tight")
             self.image(tmp.name, x=15, w=largura)
 
+def sanitize_text(text):
+    """
+    Remove caracteres que quebram a fonte Helvetica/Latin-1.
+    Substitui bullets e aspas curvas por equivalentes simples.
+    """
+    if not text:
+        return ""
+    
+    # Substituições manuais comuns
+    replacements = {
+        "•": "-",      # Bullet point vira traço
+        "“": '"',      # Aspas curvas
+        "”": '"',
+        "‘": "'",
+        "’": "'",
+        "–": "-",      # En-dash
+        "—": "-",      # Em-dash
+        "…": "...",
+        "📊": "",      # Remove emojis comuns
+        "📈": "",
+        "📉": "",
+        "🤖": "",
+        "✨": ""
+    }
+    
+    for char, replacement in replacements.items():
+        text = text.replace(char, replacement)
+        
+    # Garante que é Latin-1 compatível
+    return text.encode('latin-1', 'replace').decode('latin-1')
+
 def fmt_num(x):
     try:
         return f"{float(x):,.2f}"
@@ -68,17 +110,17 @@ def fmt_num(x):
         return str(x)
 
 def check_download_font():
-    """Descarrega a fonte DejaVuSans se não existir para suportar emojis."""
+    """Tenta baixar a fonte. Retorna o caminho se existir."""
     font_path = "DejaVuSans.ttf"
     if not os.path.exists(font_path):
         url = "https://github.com/reingart/pyfpdf/raw/master/fpdf/font/DejaVuSans.ttf"
         try:
-            r = requests.get(url, allow_redirects=True)
+            r = requests.get(url, allow_redirects=True, timeout=5)
             with open(font_path, 'wb') as f:
                 f.write(r.content)
         except:
-            pass
-    return font_path
+            return None # Falha no download
+    return font_path if os.path.exists(font_path) else None
 
 def gerar_pdf_pro(
     df_original,
@@ -89,39 +131,48 @@ def gerar_pdf_pro(
     figs_principais,
     texto_ia,
     usuario="Cliente",
-    coluna_alvo=None  # NOVO: Recebe a coluna correta para análise
+    coluna_alvo=None
 ):
     pdf = PDF(orientation="P", unit="mm", format="A4")
     
-    # 1. Configurar Fonte Unicode
+    # 1. Tenta carregar fonte Unicode
     font_path = check_download_font()
-    if os.path.exists(font_path):
-        pdf.add_font("DejaVu", "", font_path, uni=True)
-        pdf.add_font("DejaVu", "B", font_path, uni=True) # Usando a mesma para bold por simplicidade
-        main_font = "DejaVu"
+    if font_path:
+        try:
+            pdf.add_font("DejaVu", "", font_path)
+            pdf.add_font("DejaVu", "B", font_path)
+            pdf.use_unicode = True
+        except Exception:
+            pdf.use_unicode = False # Fallback se o arquivo estiver corrompido
     else:
-        main_font = "Helvetica" # Fallback
+        pdf.use_unicode = False
 
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.alias_nb_pages()
 
     # CAPA
     pdf.add_page()
-    pdf.set_font(main_font, 'B', 20)
+    
+    font_capa = "DejaVu" if pdf.use_unicode else "Helvetica"
+    pdf.set_font(font_capa, 'B', 20)
     pdf.set_text_color(*COR_AZUL)
     pdf.ln(40)
     pdf.cell(0, 10, "Relatório Executivo", ln=True, align="C")
 
-    pdf.set_font(main_font, '', 12)
+    pdf.set_font(font_capa, '', 12)
     pdf.set_text_color(*COR_CINZA)
     pdf.ln(5)
+    
+    if not pdf.use_unicode:
+        usuario = sanitize_text(usuario)
+        
     pdf.cell(0, 8, f"Cliente: {usuario}", ln=True, align="C")
 
     # RESUMO / KPIs
     pdf.add_page()
     pdf.titulo("Resumo numérico")
 
-    # LÓGICA CORRIGIDA: Usa a coluna alvo se fornecida, senão tenta a primeira numérica
+    # LÓGICA DE COLUNA
     col_valor = None
     if coluna_alvo and coluna_alvo in df_limpo.columns:
          if pd.api.types.is_numeric_dtype(df_limpo[coluna_alvo]):
@@ -138,14 +189,15 @@ def gerar_pdf_pro(
         maximo = serie.max(skipna=True)
         desvio = serie.std(skipna=True)
 
+        # Usamos traço (-) em vez de bullet (•) no texto base para garantir compatibilidade
         texto = (
             f"Coluna analisada: {col_valor}\n\n"
-            f"• Total: {fmt_num(total)}\n"
-            f"• Média: {fmt_num(media)}\n"
-            f"• Mínimo: {fmt_num(minimo)}\n"
-            f"• Máximo: {fmt_num(maximo)}\n"
-            f"• Desvio padrão: {fmt_num(desvio)}\n"
-            f"• Registros: {len(df_limpo)}"
+            f"- Total: {fmt_num(total)}\n"
+            f"- Média: {fmt_num(media)}\n"
+            f"- Mínimo: {fmt_num(minimo)}\n"
+            f"- Máximo: {fmt_num(maximo)}\n"
+            f"- Desvio padrão: {fmt_num(desvio)}\n"
+            f"- Registros: {len(df_limpo)}"
         )
         pdf.paragrafo(texto)
     else:
@@ -167,5 +219,4 @@ def gerar_pdf_pro(
     else:
         pdf.paragrafo("Nenhum parecer de IA foi fornecido.")
 
-    # Retorna bytes para o Streamlit
     return bytes(pdf.output())
