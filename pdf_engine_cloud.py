@@ -1,7 +1,7 @@
 import tempfile
 import os
 import requests
-import re  # <--- NOVA IMPORTAÇÃO ESSENCIAL
+import re
 from datetime import datetime
 
 import pandas as pd
@@ -16,31 +16,52 @@ COR_TEXTO = (40, 40, 40)
 
 def sanitize_text(text):
     """
-    Remove caracteres incompatíveis e sujeira de Markdown (**, $, etc).
+    Limpa o texto mantendo a formatação de linhas e listas.
     """
     if not text:
         return ""
     
-    # 1. Remove formatação Markdown da IA (negrito, itálico, LaTeX)
-    # Remove **texto**, __texto__, $texto$, etc.
+    # 1. Remove formatação Markdown/LaTeX da IA
     text = text.replace("**", "").replace("__", "")
-    text = text.replace("$", "").replace("%^", "%")
+    text = text.replace("$$", "").replace("$", "")
+    text = text.replace("\[", "").replace("\]", "")
     
-    # 2. Substituições de caracteres especiais (Emojis e aspas)
+    # 2. Substituições de caracteres especiais por equivalentes simples
     replacements = {
-        "•": "-", "“": '"', "”": '"', "‘": "'", "’": "'",
-        "–": "-", "—": "-", "…": "...",
-        "📊": "", "📈": "", "📉": "", "🤖": "", "✨": ""
+        "•": "-",       # Bullet point vira traço
+        "–": "-",       # Travessão vira hífen
+        "—": "-", 
+        "“": '"', "”": '"', 
+        "‘": "'", "’": "'",
+        "…": "...",
+        "📊": "", "📈": "", "📉": "", "🤖": "", "✨": "", # Remove emojis
+        "🔒": "", "📂": "", "👋": "", "🔄": "", "⚠️": ""
     }
     
     for char, replacement in replacements.items():
         text = text.replace(char, replacement)
+
+    # 3. CORREÇÃO DO LAYOUT (CRUCIAL):
+    # Não usamos mais o regex que remove todos os espaços (\s+).
+    # Em vez disso, processamos linha por linha para manter os "Enters" (\n).
     
-    # 3. Limpeza final de espaços extras (ex: espaço duplo gerado pela remoção)
-    text = re.sub(r'\s+', ' ', text).strip()
+    lines = text.split('\n')
+    cleaned_lines = []
+    
+    for line in lines:
+        # Remove espaços excessivos apenas DENTRO da linha, não entre linhas
+        line_clean = re.sub(r'[ \t]+', ' ', line).strip()
+        if line_clean:
+            cleaned_lines.append(line_clean)
+            
+    # Remonta o texto com quebras de linha limpas
+    text = "\n".join(cleaned_lines)
         
-    # 4. Garante compatibilidade Latin-1 se não estiver usando fonte Unicode
+    # 4. Garante compatibilidade final (Latin-1) se a fonte Unicode falhar
+    # Isso evita erros, transformando caracteres impossíveis em '?'
+    # Mas como já limpamos a maioria, os '?' devem sumir.
     return text.encode('latin-1', 'replace').decode('latin-1')
+
 
 class PDF(FPDF):
     def __init__(self, orientation="P", unit="mm", format="A4"):
@@ -72,7 +93,7 @@ class PDF(FPDF):
         self.set_text_color(*COR_AZUL)
         self.ln(4)
         
-        # Aplica limpeza mesmo se usar Unicode para remover Markdown (**)
+        # Sempre sanitiza títulos para evitar quebras
         texto = sanitize_text(texto)
             
         self.cell(0, 8, texto, ln=True)
@@ -86,7 +107,7 @@ class PDF(FPDF):
         self.set_font(font, '', 10)
         self.set_text_color(*COR_TEXTO)
         
-        # Aplica limpeza mesmo se usar Unicode para remover Markdown (**)
+        # Sempre sanitiza para garantir layout limpo
         texto = sanitize_text(texto)
             
         self.multi_cell(0, 5, texto)
@@ -156,7 +177,6 @@ def gerar_pdf_pro(
     pdf.set_text_color(*COR_CINZA)
     pdf.ln(5)
     
-    # Limpa nome do usuário para evitar erro se tiver emoji
     usuario = sanitize_text(usuario)
     pdf.cell(0, 8, f"Cliente: {usuario}", ln=True, align="C")
 
