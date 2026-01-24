@@ -1,233 +1,270 @@
-import tempfile
-import os
-import requests
-import re
-from datetime import datetime
-
+import streamlit as st
 import pandas as pd
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from fpdf import FPDF
+import io
 
-COR_AZUL = (0, 51, 102)
-COR_CINZA = (85, 85, 85)
-COR_TEXTO = (40, 40, 40)
+# Importações locais - Certifique-se que estes arquivos existem na mesma pasta
+from cleaner import carregar_e_limpar_inteligente
+from utils import detectar_tipos
+from layout import render_layout
+from pdf_engine_cloud import gerar_pdf_pro
+from ai_analyst import analisar_com_ia
+from database import init_db, salvar_registro, carregar_historico
 
-def sanitize_text(text):
-    """
-    Limpa o texto mantendo a formatação de linhas e listas.
-    """
-    if not text:
-        return ""
+# ============================================================
+# CONFIGURAÇÃO INICIAL
+# ============================================================
+
+st.set_page_config(page_title="Platero Analytics PRO", page_icon="📊", layout="wide")
+try:
+    init_db()
+except:
+    pass # Ignora erro de DB se não estiver configurado localmente
+
+st.markdown("""
+<style>
+    .metric-card {background-color: #f0f2f6; padding: 20px; border-radius: 10px; text-align: center;}
+    div[data-testid="stExpander"] {border: none; box-shadow: 0px 2px 5px rgba(0,0,0,0.1);}
+</style>
+""", unsafe_allow_html=True)
+
+# ============================================================
+# LOGIN
+# ============================================================
+
+def check_password():
+    if st.session_state.get("password_correct", False):
+        return True
+
+    def password_entered():
+        if "passwords" in st.secrets and st.session_state["password"] in st.secrets["passwords"].values():
+            st.session_state["password_correct"] = True
+            st.session_state["username"] = [
+                k for k, v in st.secrets["passwords"].items() if v == st.session_state["password"]
+            ][0]
+            del st.session_state["password"]
+        else:
+            st.session_state["password_correct"] = False
+
+    # Se não houver secrets configurados, libera acesso direto (para testes locais)
+    if "passwords" not in st.secrets:
+        return True
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("### 🔒 Acesso Corporativo")
+        st.text_input("Chave de Acesso:", type="password", on_change=password_entered, key="password")
+        if "password_correct" in st.session_state:
+            st.error("Chave inválida.")
+
+    return False
+
+if not check_password():
+    st.stop()
+
+usuario_atual = st.session_state.get("username", "Cliente")
+
+# ============================================================
+# CABEÇALHO
+# ============================================================
+
+col_logo, col_titulo = st.columns([1, 6])
+with col_titulo:
+    st.title(f"Painel Executivo — {usuario_atual.title()}")
+
+st.markdown("---")
+
+# ============================================================
+# SIDEBAR & CARREGAMENTO
+# ============================================================
+
+with st.sidebar:
+    st.header("📂 Central de Arquivos")
+    arquivo = st.file_uploader("Carregar Base de Dados (Excel/CSV)", type=["xlsx", "csv"])
     
-    # 1. Remove formatação Markdown/LaTeX da IA
-    text = text.replace("**", "").replace("__", "")
-    text = text.replace("$$", "").replace("$", "")
-    text = text.replace("\[", "").replace("\]", "")
-    
-    # 2. Substituições de caracteres especiais por equivalentes simples
-    replacements = {
-        "•": "-",       # Bullet point vira traço
-        "–": "-",       # Travessão vira hífen
-        "—": "-", 
-        "“": '"', "”": '"', 
-        "‘": "'", "’": "'",
-        "…": "...",
-        "📊": "", "📈": "", "📉": "", "🤖": "", "✨": "", # Remove emojis
-        "🔒": "", "📂": "", "👋": "", "🔄": "", "⚠️": ""
-    }
-    
-    for char, replacement in replacements.items():
-        text = text.replace(char, replacement)
+    usar_modo_seguro = st.checkbox("🛠️ Modo Seguro (Carregamento Simples)", 
+                                  help="Marque se os números aparecerem gigantes ou errados.")
 
-    # 3. CORREÇÃO DO LAYOUT (CRUCIAL):
-    # Não usamos mais o regex que remove todos os espaços (\s+).
-    # Em vez disso, processamos linha por linha para manter os "Enters" (\n).
-    
-    lines = text.split('\n')
-    cleaned_lines = []
-    
-    for line in lines:
-        # Remove espaços excessivos apenas DENTRO da linha, não entre linhas
-        line_clean = re.sub(r'[ \t]+', ' ', line).strip()
-        if line_clean:
-            cleaned_lines.append(line_clean)
-            
-    # Remonta o texto com quebras de linha limpas
-    text = "\n".join(cleaned_lines)
-        
-    # 4. Garante compatibilidade final (Latin-1) se a fonte Unicode falhar
-    # Isso evita erros, transformando caracteres impossíveis em '?'
-    # Mas como já limpamos a maioria, os '?' devem sumir.
-    return text.encode('latin-1', 'replace').decode('latin-1')
-
-
-class PDF(FPDF):
-    def __init__(self, orientation="P", unit="mm", format="A4"):
-        super().__init__(orientation=orientation, unit=unit, format=format)
-        self.use_unicode = False
-
-    def header(self):
-        font = "DejaVu" if self.use_unicode else "Helvetica"
-        self.set_font(font, 'B', 14)
-        self.set_text_color(*COR_AZUL)
-        self.cell(0, 8, "Relatório Executivo - Platero Analytics", ln=True, align="L")
-
-        self.set_font(font, '', 9)
-        self.set_text_color(*COR_CINZA)
-        data_str = datetime.now().strftime('%d/%m/%Y %H:%M')
-        self.cell(0, 6, f"Gerado em {data_str}", ln=True, align="L")
-        self.ln(4)
-
-    def footer(self):
-        self.set_y(-15)
-        font = "DejaVu" if self.use_unicode else "Helvetica"
-        self.set_font(font, '', 8)
-        self.set_text_color(*COR_CINZA)
-        self.cell(0, 10, f"Página {self.page_no()}/{{nb}}", 0, 0, 'C')
-
-    def titulo(self, texto):
-        font = "DejaVu" if self.use_unicode else "Helvetica"
-        self.set_font(font, 'B', 12)
-        self.set_text_color(*COR_AZUL)
-        self.ln(4)
-        
-        # Sempre sanitiza títulos para evitar quebras
-        texto = sanitize_text(texto)
-            
-        self.cell(0, 8, texto, ln=True)
-        self.set_draw_color(200, 200, 200)
-        y = self.get_y()
-        self.line(10, y, 200, y)
-        self.ln(3)
-
-    def paragrafo(self, texto):
-        font = "DejaVu" if self.use_unicode else "Helvetica"
-        self.set_font(font, '', 10)
-        self.set_text_color(*COR_TEXTO)
-        
-        # Sempre sanitiza para garantir layout limpo
-        texto = sanitize_text(texto)
-            
-        self.multi_cell(0, 5, texto)
-        self.ln(2)
-
-    def inserir_figura(self, fig, largura=170):
-        if fig is None:
-            return
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
-            fig.savefig(tmp.name, dpi=120, bbox_inches="tight")
-            self.image(tmp.name, x=15, w=largura)
-
-def fmt_num(x):
-    try:
-        return f"{float(x):,.2f}"
-    except:
-        return str(x)
-
-def check_download_font():
-    font_path = "DejaVuSans.ttf"
-    if not os.path.exists(font_path):
-        url = "https://github.com/reingart/pyfpdf/raw/master/fpdf/font/DejaVuSans.ttf"
+    st.markdown("---")
+    if st.checkbox("Ver Histórico de Processamento"):
         try:
-            r = requests.get(url, allow_redirects=True, timeout=5)
-            with open(font_path, 'wb') as f:
-                f.write(r.content)
+            st.dataframe(carregar_historico(usuario_atual))
         except:
-            return None
-    return font_path if os.path.exists(font_path) else None
+            st.info("Histórico indisponível.")
 
-def gerar_pdf_pro(
-    df_original,
-    df_limpo,
-    datas,
-    numericas,
-    categoricas,
-    figs_principais,
-    texto_ia,
-    usuario="Cliente",
-    coluna_alvo=None
-):
-    pdf = PDF(orientation="P", unit="mm", format="A4")
-    
-    font_path = check_download_font()
-    if font_path:
+if not arquivo:
+    st.info("👋 Bem-vindo! Arraste sua planilha para começar a análise automática.")
+    st.stop()
+
+# ============================================================
+# LÓGICA DE CARREGAMENTO
+# ============================================================
+
+df = pd.DataFrame()
+erro = None
+
+with st.spinner("🔄 Processando arquivo..."):
+    if usar_modo_seguro:
         try:
-            pdf.add_font("DejaVu", "", font_path)
-            pdf.add_font("DejaVu", "B", font_path)
-            pdf.use_unicode = True
+            if arquivo.name.endswith('.csv'):
+                try:
+                    df = pd.read_csv(arquivo, sep=None, engine='python')
+                except:
+                    arquivo.seek(0)
+                    df = pd.read_csv(arquivo, sep=',')
+            else:
+                df = pd.read_excel(arquivo)
+            df = df.convert_dtypes()
+        except Exception as e:
+            erro = f"Erro no modo seguro: {e}"
+    else:
+        df, erro = carregar_e_limpar_inteligente(arquivo)
+
+if erro:
+    st.error(f"Não conseguimos processar este arquivo: {erro}")
+    st.stop()
+
+if df.empty:
+    st.warning("O arquivo parece vazio ou não contém dados legíveis.")
+    st.stop()
+
+# ============================================================
+# DETECÇÃO DE TIPOS
+# ============================================================
+
+tipos = detectar_tipos(df)
+
+datas = tipos["datas"]
+numericas = tipos["numericas"]
+categoricas = tipos["categoricas"]
+monetarias = tipos["monetarias"]
+quantidades = tipos["quantidades"]
+booleanas = tipos["booleanas"]
+texto_livre = tipos["texto_livre"]
+
+if not numericas:
+    st.error("⚠️ Identificamos os dados, mas não achamos colunas numéricas.")
+    st.stop()
+
+# ============================================================
+# KPIs PRINCIPAIS
+# ============================================================
+
+st.subheader("📈 Visão Geral")
+
+col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
+
+col_kpi_padrao = numericas[0]
+valor_total = df[col_kpi_padrao].sum()
+media_valor = df[col_kpi_padrao].mean()
+total_linhas = len(df)
+
+with col_kpi1:
+    st.metric("Total Geral", f"{valor_total:,.2f}")
+
+with col_kpi2:
+    st.metric("Média Geral", f"{media_valor:,.2f}")
+
+with col_kpi3:
+    st.metric("Registros Processados", f"{total_linhas}")
+
+st.markdown("---")
+
+# ============================================================
+# ÁREA DE GRÁFICOS
+# ============================================================
+
+col_grafico, col_config = st.columns([3, 1])
+
+with col_config:
+    st.markdown("### ⚙️ Ajuste Fino")
+
+    index_padrao = 0
+    if "Origem_Aba" in df.columns:
+        index_padrao = list(df.columns).index("Origem_Aba")
+    elif datas:
+        index_padrao = list(df.columns).index(datas[0])
+
+    eixo_x_view = st.selectbox("Agrupar Dados Por:", list(df.columns), index=index_padrao)
+    eixo_y_view = st.selectbox("Métrica Analisada:", numericas, index=0)
+
+    chave_salvo = f"save_{arquivo.name}_{len(df)}"
+    if chave_salvo not in st.session_state:
+        try:
+            salvar_registro(usuario_atual, arquivo.name, df, eixo_y_view)
         except:
-            pdf.use_unicode = False
-    else:
-        pdf.use_unicode = False
+            pass
+        st.session_state[chave_salvo] = True
 
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.alias_nb_pages()
+with col_grafico:
+    df_agrupado = render_layout(df, datas, numericas, categoricas, lang="pt")
 
-    # CAPA
-    pdf.add_page()
-    font_capa = "DejaVu" if pdf.use_unicode else "Helvetica"
-    pdf.set_font(font_capa, 'B', 20)
-    pdf.set_text_color(*COR_AZUL)
-    pdf.ln(40)
-    pdf.cell(0, 10, "Relatório Executivo", ln=True, align="C")
+# ============================================================
+# CONSULTOR VIRTUAL
+# ============================================================
 
-    pdf.set_font(font_capa, '', 12)
-    pdf.set_text_color(*COR_CINZA)
-    pdf.ln(5)
-    
-    usuario = sanitize_text(usuario)
-    pdf.cell(0, 8, f"Cliente: {usuario}", ln=True, align="C")
+st.markdown("---")
+st.subheader("🤖 Consultor Virtual — Análise Avançada")
 
-    # RESUMO / KPIs
-    pdf.add_page()
-    pdf.titulo("Resumo numérico")
+col_ia_txt, col_ia_btn = st.columns([4, 1])
 
-    # --- LÓGICA DE COLUNA ALVO ---
-    col_valor = None
-    if coluna_alvo and coluna_alvo in df_limpo.columns:
-         if pd.api.types.is_numeric_dtype(df_limpo[coluna_alvo]):
-             col_valor = coluna_alvo
-    
-    if not col_valor and numericas:
-        col_valor = numericas[0]
+with col_ia_btn:
+    if st.button("✨ Analisar com IA Premium", type="primary"):
+        with st.spinner("Lendo padrões..."):
+            analise = analisar_com_ia(df, eixo_x_view, eixo_y_view)
+            st.session_state["analise_ia"] = analise
 
-    if col_valor:
-        serie = pd.to_numeric(df_limpo[col_valor], errors="coerce")
-        total = serie.sum(skipna=True)
-        media = serie.mean(skipna=True)
-        minimo = serie.min(skipna=True)
-        maximo = serie.max(skipna=True)
-        desvio = serie.std(skipna=True)
+if "analise_ia" in st.session_state:
+    st.info(st.session_state["analise_ia"])
 
-        texto = (
-            f"Coluna analisada: {col_valor}\n\n"
-            f"- Total: {fmt_num(total)}\n"
-            f"- Média: {fmt_num(media)}\n"
-            f"- Mínimo: {fmt_num(minimo)}\n"
-            f"- Máximo: {fmt_num(maximo)}\n"
-            f"- Desvio padrão: {fmt_num(desvio)}\n"
-            f"- Registros: {len(df_limpo)}"
-        )
-        pdf.paragrafo(texto)
-    else:
-        pdf.paragrafo("Nenhuma coluna numérica válida para KPIs.")
+# ============================================================
+# EXPORTAÇÃO DO RELATÓRIO
+# ============================================================
 
-    # GRÁFICOS
-    if figs_principais:
-        pdf.titulo("Gráficos principais")
-        for fig in figs_principais:
-            pdf.inserir_figura(fig)
-            pdf.ln(5)
+st.markdown("---")
+st.subheader("📄 Exportação do Relatório")
 
-    # TEXTO DA IA
-    pdf.add_page()
-    pdf.titulo("Parecer da Inteligência Artificial")
+with st.container():
+    st.markdown("""
+    <div style="background-color: #f8f9fc; padding: 25px; border-radius: 12px; border: 1px solid #e0e0e0;">
+        <h3 style="margin-top: 0; color: #003366;">📘 Relatório Executivo Profissional</h3>
+        <p style="font-size: 15px; color: #444;">Gere um relatório completo em PDF.</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    if texto_ia:
-        pdf.paragrafo(texto_ia)
-    else:
-        pdf.paragrafo("Nenhum parecer de IA foi fornecido.")
+    st.write("")
+    col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
 
-    return bytes(pdf.output())
+    if "pdf_bytes" not in st.session_state:
+        st.session_state["pdf_bytes"] = None
+
+    with col_btn2:
+        if st.button("📄 Gerar Relatório PDF", type="primary"):
+            figs = st.session_state.get("figs_pdf", [])
+            texto_ia = st.session_state.get("analise_ia", "")
+
+            with st.spinner("📑 Montando relatório..."):
+                try:
+                    pdf_data = gerar_pdf_pro(
+                        df_original=df,
+                        df_limpo=df,
+                        datas=datas,
+                        numericas=numericas,
+                        categoricas=categoricas,
+                        figs_principais=figs,
+                        texto_ia=texto_ia,
+                        usuario=usuario_atual,
+                        coluna_alvo=eixo_y_view
+                    )
+                    st.session_state["pdf_bytes"] = bytes(pdf_data)
+                    st.success("Relatório gerado!")
+                except Exception as e:
+                    st.error(f"Erro ao gerar PDF: {e}")
+
+        if st.session_state["pdf_bytes"] is not None:
+            st.download_button(
+                label="⬇️ Baixar Relatório PDF",
+                data=st.session_state["pdf_bytes"],
+                file_name="Relatorio_Platero_Pro.pdf",
+                mime="application/pdf",
+                type="primary"
+            )
